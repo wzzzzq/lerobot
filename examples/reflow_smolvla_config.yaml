@@ -7,14 +7,7 @@ policy:
 
   # Reflow parameters
   use_reflow: true
-  teacher_model_path: "lerobot/smolvla_base"  # Path to teacher model (can be HF repo or local path)
-  reflow_num_inference_steps: 10  # Number of ODE steps for generating X_1 from teacher
-
-  # Standard SmolVLA parameters
-  n_obs_steps: 1
-  chunk_size: 50
-  n_action_steps: 50
-  num_steps: 10  # Inference steps for student model
+  teacher_model_path: "lerobot/smolvla_base"  # Path to teacher model (HF repo or local path)
 
   # Model architecture
   vlm_model_name: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
@@ -22,6 +15,9 @@ policy:
   freeze_vision_encoder: true
   train_expert_only: true
   expert_width_multiplier: 0.75
+
+  # Inference (will use teacher's num_steps during training data generation)
+  num_steps: 10
 
   # Training settings
   optimizer_lr: 1.0e-4
@@ -34,7 +30,6 @@ policy:
 dataset:
   repo_id: "your_dataset_repo_id"  # Replace with your dataset
   batch_size: 32
-  num_workers: 4
 
 # Training configuration
 training:
@@ -43,12 +38,8 @@ training:
   save_freq: 5000
   log_freq: 100
 
-  # Hardware
-  device: "cuda"
-  use_amp: true  # Automatic Mixed Precision
-
 # Experiment tracking
 wandb:
   enable: true
   project: "smolvla_reflow"
-  name: "reflow_2rf"  # 2-Rectified Flow
+  name: "2rf"
