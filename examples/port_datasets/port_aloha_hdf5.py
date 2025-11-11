@@ -106,23 +106,49 @@ def get_aloha_features(cameras: list[str]) -> dict:
 def get_cameras(hdf5_file: Path) -> list[str]:
     """Extract camera names from HDF5 file."""
     with h5py.File(hdf5_file, "r") as ep:
-        return [key for key in ep["/observation"].keys() if "depth" not in key]
+        # Support both /observation and /observations paths
+        obs_path = "/observations" if "/observations" in ep else "/observation"
+        images_path = f"{obs_path}/images"
+        if images_path in ep:
+            return [key for key in ep[images_path].keys() if "depth" not in key]
+        return [key for key in ep[obs_path].keys() if "depth" not in key]
 
 
 def load_raw_images_per_camera(ep: h5py.File, cameras: list[str]) -> dict[str, np.ndarray]:
     """Load and process images from HDF5 file for all cameras."""
     imgs_per_cam = {}
+    
+    # Support both /observation and /observations paths
+    obs_path = "/observations" if "/observations" in ep else "/observation"
+    images_path = f"{obs_path}/images"
+    
     for camera in cameras:
+        # Try different possible image paths
+        possible_paths = [
+            f"{images_path}/{camera}",
+            f"{obs_path}/{camera}/rgb",
+            f"{obs_path}/{camera}",
+        ]
+        
+        img_dataset = None
+        for path in possible_paths:
+            if path in ep:
+                img_dataset = ep[path]
+                break
+        
+        if img_dataset is None:
+            raise ValueError(f"Could not find image data for camera {camera}")
+        
         # Check if images are uncompressed (4D array) or compressed (need decoding)
-        uncompressed = ep[f"/observation/{camera}/rgb"].ndim == 4
+        uncompressed = img_dataset.ndim == 4
 
         if uncompressed:
             # Load all images in RAM
-            imgs_array = ep[f"/observation/{camera}/rgb"][:]
+            imgs_array = img_dataset[:]
         else:
             # Load one compressed image after the other in RAM and uncompress
             imgs_array = []
-            for data in ep[f"/observation/{camera}/rgb"]:
+            for data in img_dataset:
                 data = np.frombuffer(data, np.uint8)
                 img = cv2.imdecode(data, cv2.IMREAD_COLOR)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -146,8 +172,22 @@ def load_raw_episode_data(
 ) -> tuple[dict[str, np.ndarray], torch.Tensor, torch.Tensor]:
     """Load state, action, and images from a single HDF5 episode file."""
     with h5py.File(ep_path, "r") as ep:
-        state = torch.from_numpy(ep["/joint_action/vector"][:]).float()
-        action = torch.from_numpy(ep["/joint_action/vector"][:]).float()
+        # Support different data structures
+        # Try /observations/qpos first (RoboTwin format), then /joint_action/vector (ALOHA format)
+        if "/observations/qpos" in ep:
+            state = torch.from_numpy(ep["/observations/qpos"][:]).float()
+        elif "/joint_action/vector" in ep:
+            state = torch.from_numpy(ep["/joint_action/vector"][:]).float()
+        else:
+            raise ValueError("Could not find state data in HDF5 file")
+        
+        # Try /action first (RoboTwin format), then /joint_action/vector (ALOHA format)
+        if "/action" in ep:
+            action = torch.from_numpy(ep["/action"][:]).float()
+        elif "/joint_action/vector" in ep:
+            action = torch.from_numpy(ep["/joint_action/vector"][:]).float()
+        else:
+            raise ValueError("Could not find action data in HDF5 file")
 
         imgs_per_cam = load_raw_images_per_camera(ep, get_cameras(ep_path))
 
@@ -158,11 +198,20 @@ def load_instruction(instruction_dir: Path, episode_idx: int) -> str:
     """Load instruction for a given episode from JSON file."""
     json_path = instruction_dir / f"episode{episode_idx}.json"
     if not json_path.exists():
+        # Try with underscore format
+        json_path = instruction_dir / f"episode_{episode_idx}" / "instructions.json"
+    if not json_path.exists():
         raise FileNotFoundError(f"Instruction file not found: {json_path}")
 
     with open(json_path) as f_instr:
         instruction_dict = json.load(f_instr)
-        instructions = instruction_dict["seen"]
+        # Support both "seen" and "instructions" keys
+        if "instructions" in instruction_dict:
+            instructions = instruction_dict["instructions"]
+        elif "seen" in instruction_dict:
+            instructions = instruction_dict["seen"]
+        else:
+            raise ValueError(f"Could not find instructions in {json_path}")
         # Randomly select one instruction from the available options
         instruction = np.random.choice(instructions)
 
@@ -260,7 +309,8 @@ def port_aloha_hdf5(
 
     # Sort by episode number
     def extract_episode_number(path):
-        match = re.search(r"episode(\d+)\.hdf5", path.name)
+        # Try different patterns: episode_0.hdf5, episode0.hdf5, etc.
+        match = re.search(r"episode[_]?(\d+)\.hdf5", path.name)
         if match:
             return int(match.group(1))
         return 0

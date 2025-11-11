@@ -37,6 +37,14 @@ pip install -e ".[smolvla]"
 将 ALOHA HDF5 数据集转换为 LeRobot 格式：
 
 ```bash
+# 转换 RoboTwin stack_blocks_two 数据集（本地保存，无需 push to hub）
+python examples/port_datasets/port_aloha_hdf5.py \
+    --raw-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --instruction-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --repo-id robotwin/stack_blocks_two \
+    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two
+
+# 通用格式（替换路径）
 python examples/port_datasets/port_aloha_hdf5.py \
     --raw-dir /path/to/hdf5/files \
     --instruction-dir /path/to/instructions \
@@ -49,6 +57,16 @@ python examples/port_datasets/port_aloha_hdf5.py \
 使用转换后的数据集训练 SmolVLA 模型：
 
 ```bash
+# 使用本地转换的 stack_blocks_two 数据集训练
+lerobot-train \
+    --policy-name smolvla \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --output-dir outputs/smolvla_stack_blocks \
+    --num-train-iters 10000 \
+    --batch-size 8
+
+# 通用格式
 lerobot-train \
     --policy-name smolvla \
     --repo-id myusername/aloha-dataset \
@@ -65,6 +83,10 @@ lerobot-train \
 #### 准备数据
 
 **HDF5 文件结构**：
+
+支持两种格式：
+
+1. **ALOHA 原始格式**：
 ```
 /observation/
     {camera_name}/
@@ -73,21 +95,51 @@ lerobot-train \
     vector/                     # 关节状态和动作 [14维]
 ```
 
-**指令文件格式**（`episode0.json`, `episode1.json` 等）：
+2. **RoboTwin 格式**：
+```
+/observations/
+    images/
+        {camera_name}/          # 压缩图像数据
+    qpos/                       # 关节状态 [14维]
+/action/                        # 动作 [14维]
+```
+
+**指令文件格式**：
+
+支持两种格式：
+
+1. **标准格式**（`episode0.json`, `episode1.json` 等）：
 ```json
 {
   "seen": [
     "pick up the red block",
-    "grasp the red object",
-    "take the red cube"
+    "grasp the red object"
+  ]
+}
+```
+
+2. **RoboTwin 格式**（`episode_0/instructions.json`, `episode_1/instructions.json` 等）：
+```json
+{
+  "instructions": [
+    "Move red block and green block to the center",
+    "Stack green block above red block"
   ]
 }
 ```
 
 #### 转换命令
 
-**基本转换**：
+**基本转换（本地保存）**：
 ```bash
+# RoboTwin stack_blocks_two 数据集示例
+python examples/port_datasets/port_aloha_hdf5.py \
+    --raw-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --instruction-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --repo-id robotwin/stack_blocks_two \
+    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two
+
+# 通用格式
 python examples/port_datasets/port_aloha_hdf5.py \
     --raw-dir ./data/raw/aloha \
     --instruction-dir ./data/instructions \
@@ -98,14 +150,14 @@ python examples/port_datasets/port_aloha_hdf5.py \
 **转换特定 episodes**：
 ```bash
 python examples/port_datasets/port_aloha_hdf5.py \
-    --raw-dir ./data/raw/aloha \
-    --instruction-dir ./data/instructions \
-    --repo-id myuser/aloha-dataset \
-    --output-dir ./data/lerobot/aloha-dataset \
+    --raw-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --instruction-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --repo-id robotwin/stack_blocks_two \
+    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
     --episodes 0 1 2 3 4
 ```
 
-**转换并上传到 Hub**：
+**转换并上传到 Hub**（如需要）：
 ```bash
 python examples/port_datasets/port_aloha_hdf5.py \
     --raw-dir ./data/raw/aloha \
@@ -130,8 +182,8 @@ python examples/port_datasets/port_aloha_hdf5.py \
 **使用可视化工具**：
 ```bash
 lerobot-dataset-viz \
-    --repo-id myuser/aloha-dataset \
-    --root /path/to/output \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
     --mode local \
     --episode-index 0
 ```
@@ -141,8 +193,8 @@ lerobot-dataset-viz \
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 dataset = LeRobotDataset(
-    repo_id="myuser/aloha-dataset",
-    root="/path/to/output"
+    repo_id="robotwin/stack_blocks_two",
+    root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets"
 )
 
 print(f"Total episodes: {dataset.meta.total_episodes}")
@@ -175,11 +227,12 @@ output_dir/
 
 **基本训练**：
 ```bash
+# 使用 stack_blocks_two 数据集
 lerobot-train \
     --policy-name smolvla \
-    --repo-id myuser/aloha-dataset \
-    --root /path/to/output \
-    --output-dir outputs/smolvla_aloha \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --output-dir outputs/smolvla_stack_blocks \
     --num-train-iters 10000 \
     --batch-size 8 \
     --eval-freq 1000 \
@@ -193,14 +246,14 @@ wandb login
 
 lerobot-train \
     --policy-name smolvla \
-    --repo-id myuser/aloha-dataset \
-    --root /path/to/output \
-    --output-dir outputs/smolvla_aloha \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --output-dir outputs/smolvla_stack_blocks \
     --num-train-iters 10000 \
     --batch-size 8 \
     --use-wandb \
-    --wandb-project my-robotics-project \
-    --wandb-run-name smolvla-aloha-run1
+    --wandb-project robotwin-training \
+    --wandb-run-name smolvla-stack-blocks-run1
 ```
 
 **多 GPU 训练**：
@@ -208,9 +261,9 @@ lerobot-train \
 accelerate launch --multi_gpu --num_processes=4 \
     src/lerobot/scripts/lerobot_train.py \
     --policy-name smolvla \
-    --repo-id myuser/aloha-dataset \
-    --root /path/to/output \
-    --output-dir outputs/smolvla_aloha \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --output-dir outputs/smolvla_stack_blocks \
     --num-train-iters 10000 \
     --batch-size 32
 ```
@@ -253,8 +306,8 @@ def main():
 
     # 加载数据集元数据
     dataset_metadata = LeRobotDatasetMetadata(
-        repo_id="myuser/aloha-dataset",
-        root="./data/lerobot"
+        repo_id="robotwin/stack_blocks_two",
+        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets"
     )
 
     # 准备特征配置
@@ -285,8 +338,8 @@ def main():
 
     # 加载数据集
     dataset = LeRobotDataset(
-        repo_id="myuser/aloha-dataset",
-        root="./data/lerobot",
+        repo_id="robotwin/stack_blocks_two",
+        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets",
         delta_timestamps=delta_timestamps
     )
 
@@ -527,34 +580,34 @@ git clone https://github.com/wzzzzq/lerobot.git
 cd lerobot
 pip install -e ".[smolvla]"
 
-# 3. 转换数据集
+# 3. 转换 RoboTwin stack_blocks_two 数据集
 python examples/port_datasets/port_aloha_hdf5.py \
-    --raw-dir ./data/raw/aloha \
-    --instruction-dir ./data/instructions \
-    --repo-id myuser/aloha-dataset \
-    --output-dir ./data/lerobot/aloha-dataset
+    --raw-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --instruction-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
+    --repo-id robotwin/stack_blocks_two \
+    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two
 
 # 4. 验证数据集
 lerobot-dataset-viz \
-    --repo-id myuser/aloha-dataset \
-    --root ./data/lerobot \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
     --mode local \
     --episode-index 0
 
 # 5. 训练 SmolVLA
 lerobot-train \
     --policy-name smolvla \
-    --repo-id myuser/aloha-dataset \
-    --root ./data/lerobot \
-    --output-dir outputs/smolvla_aloha \
+    --repo-id robotwin/stack_blocks_two \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --output-dir outputs/smolvla_stack_blocks \
     --num-train-iters 10000 \
     --batch-size 8 \
     --use-wandb \
-    --wandb-project my-robotics
+    --wandb-project robotwin-training
 
 # 6. 评估模型
 lerobot-eval \
-    --policy-path outputs/smolvla_aloha \
+    --policy-path outputs/smolvla_stack_blocks \
     --env aloha \
     --num-episodes 10
 ```
