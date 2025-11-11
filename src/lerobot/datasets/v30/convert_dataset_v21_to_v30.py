@@ -22,7 +22,8 @@ This script will help you convert any LeRobot dataset already pushed to the hub 
 - Check consistency between these new stats and the old ones.
 - Remove the deprecated `stats.json`.
 - Update codebase_version in `info.json`.
-- Push this new version to the hub on the 'main' branch and tags it with "v3.0".
+- Create a new v3.0 directory alongside the original dataset (preserves original).
+- Optionally push this new version to the hub on the 'main' branch and tags it with "v3.0".
 
 Usage:
 
@@ -32,12 +33,16 @@ python src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
     --repo-id=lerobot/pusht
 ```
 
-Convert a local dataset (works in place):
+Convert a local dataset (creates new v3.0 directory, preserves original):
 ```bash
 python src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
     --repo-id=lerobot/pusht \
-    --root=/path/to/local/dataset/directory
+    --root=/path/to/local/dataset/directory \
     --push-to-hub=false
+
+# This will create:
+#   /path/to/local/dataset/directory (original v2.1, unchanged)
+#   /path/to/local/dataset/directory_v30 (converted v3.0)
 ```
 
 """
@@ -469,21 +474,17 @@ def convert_dataset(
 
     # Set root based on whether local dataset path is provided
     use_local_dataset = False
-    root = HF_LEROBOT_HOME / repo_id if root is None else Path(root) / repo_id
+    root = HF_LEROBOT_HOME / repo_id if root is None else Path(root)
     if root.exists():
         validate_local_dataset_version(root)
         use_local_dataset = True
         print(f"Using local dataset at {root}")
 
-    old_root = root.parent / f"{root.name}_old"
     new_root = root.parent / f"{root.name}_v30"
 
-    # Handle old_root cleanup if both old_root and root exist
-    if old_root.is_dir() and root.is_dir():
-        shutil.rmtree(str(root))
-        shutil.move(str(old_root), str(root))
-
+    # Clean up existing v30 directory if it exists
     if new_root.is_dir():
+        print(f"Removing existing v3.0 directory at {new_root}")
         shutil.rmtree(new_root)
 
     if not use_local_dataset:
@@ -494,16 +495,19 @@ def convert_dataset(
             local_dir=root,
         )
 
+    print(f"Converting dataset from {root} to {new_root}")
     convert_info(root, new_root, data_file_size_in_mb, video_file_size_in_mb)
     convert_tasks(root, new_root)
     episodes_metadata = convert_data(root, new_root, data_file_size_in_mb)
     episodes_videos_metadata = convert_videos(root, new_root, video_file_size_in_mb)
     convert_episodes_metadata(root, new_root, episodes_metadata, episodes_videos_metadata)
 
-    shutil.move(str(root), str(old_root))
-    shutil.move(str(new_root), str(root))
+    print(f"Conversion completed!")
+    print(f"  Original dataset (v2.1): {root}")
+    print(f"  Converted dataset (v3.0): {new_root}")
 
     if push_to_hub:
+        print(f"Pushing converted dataset to hub from {new_root}")
         hub_api = HfApi()
         try:
             hub_api.delete_tag(repo_id, tag=CODEBASE_VERSION, repo_type="dataset")
@@ -518,7 +522,8 @@ def convert_dataset(
         )
         hub_api.create_tag(repo_id, tag=CODEBASE_VERSION, revision=branch, repo_type="dataset")
 
-        LeRobotDataset(repo_id).push_to_hub()
+        # Load dataset from the new_root (v3.0) location
+        LeRobotDataset(repo_id, root=new_root).push_to_hub()
 
 
 if __name__ == "__main__":
