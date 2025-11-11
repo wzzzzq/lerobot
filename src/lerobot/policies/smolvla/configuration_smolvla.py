@@ -102,6 +102,10 @@ class SmolVLAConfig(PreTrainedConfig):
     min_period: float = 4e-3  # sensitivity range for the timestep used in sine-cosine positional encoding
     max_period: float = 4.0
 
+    # Reflow parameters
+    use_reflow: bool = False  # Enable Reflow training (Rectified Flow)
+    teacher_model_path: str | None = None  # Path to teacher model for Reflow data generation
+
     def __post_init__(self):
         super().__post_init__()
 

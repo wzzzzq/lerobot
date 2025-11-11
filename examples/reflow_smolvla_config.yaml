@@ -1,0 +1,45 @@
+# Reflow Training Configuration for SmolVLA
+# This configuration enables Rectified Flow training to straighten the ODE trajectories
+
+# Policy configuration
+policy:
+  type: smolvla
+
+  # Reflow parameters
+  use_reflow: true
+  teacher_model_path: "lerobot/smolvla_base"  # Path to teacher model (HF repo or local path)
+
+  # Model architecture
+  vlm_model_name: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+  load_vlm_weights: true
+  freeze_vision_encoder: true
+  train_expert_only: true
+  expert_width_multiplier: 0.75
+
+  # Inference (will use teacher's num_steps during training data generation)
+  num_steps: 10
+
+  # Training settings
+  optimizer_lr: 1.0e-4
+  optimizer_weight_decay: 1.0e-10
+  optimizer_grad_clip_norm: 10.0
+  scheduler_warmup_steps: 1000
+  scheduler_decay_steps: 30000
+
+# Dataset configuration
+dataset:
+  repo_id: "your_dataset_repo_id"  # Replace with your dataset
+  batch_size: 32
+
+# Training configuration
+training:
+  steps: 50000
+  eval_freq: 5000
+  save_freq: 5000
+  log_freq: 100
+
+# Experiment tracking
+wandb:
+  enable: true
+  project: "smolvla_reflow"
+  name: "2rf"
