@@ -24,6 +24,14 @@ Example usage:
         --repo-id username/dataset-name \
         --output-dir /path/to/output
 
+Resume from interruption:
+    python examples/port_datasets/port_aloha_hdf5.py \
+        --raw-dir /path/to/raw/data \
+        --instruction-dir /path/to/instructions \
+        --repo-id username/dataset-name \
+        --output-dir /path/to/output \
+        --resume
+
 Note: The instruction directory should contain JSON files named episode{N}.json with the format:
     {"seen": ["instruction 1", "instruction 2", ...]}
 """
@@ -50,6 +58,55 @@ from lerobot.utils.utils import get_elapsed_time_in_days_hours_minutes_seconds, 
 # ALOHA constants
 ALOHA_FPS = 30
 ALOHA_ROBOT_TYPE = "aloha"
+
+
+def get_completed_episodes(dataset_path: Path) -> set[int]:
+    """
+    Get the set of episode indices that have already been converted.
+
+    Args:
+        dataset_path: Path to the LeRobot dataset directory
+
+    Returns:
+        Set of completed episode indices
+    """
+    completed = set()
+
+    # Check if dataset exists
+    if not dataset_path.exists():
+        return completed
+
+    # Check for episodes metadata files
+    episodes_dir = dataset_path / "meta" / "episodes"
+    if not episodes_dir.exists():
+        return completed
+
+    try:
+        # Try to load the dataset and get episode information
+        import pandas as pd
+
+        # Find all episode parquet files
+        episode_files = list(episodes_dir.rglob("*.parquet"))
+        if not episode_files:
+            return completed
+
+        # Read all episode files and collect episode indices
+        for ep_file in episode_files:
+            try:
+                df = pd.read_parquet(ep_file)
+                if "episode_index" in df.columns:
+                    completed.update(df["episode_index"].tolist())
+            except Exception as e:
+                logging.warning(f"Could not read episode file {ep_file}: {e}")
+                continue
+
+        logging.info(f"Found {len(completed)} completed episodes: {sorted(completed)}")
+
+    except Exception as e:
+        logging.warning(f"Could not load completed episodes: {e}")
+        return set()
+
+    return completed
 
 
 def get_aloha_features(cameras: list[str]) -> dict:
@@ -229,6 +286,7 @@ def port_aloha_hdf5(
     output_dir: Path | None = None,
     episodes: list[int] | None = None,
     push_to_hub: bool = False,
+    resume: bool = False,
 ):
     """
     Port ALOHA HDF5 dataset to LeRobot v3.0 format.
@@ -240,13 +298,27 @@ def port_aloha_hdf5(
         output_dir: Output directory for the converted dataset (default: ~/.cache/huggingface/lerobot/{repo_id})
         episodes: List of episode indices to convert (None = all episodes)
         push_to_hub: Whether to push the dataset to Hugging Face Hub
+        resume: Whether to resume from a previous interrupted conversion
     """
     init_logging()
 
-    # Clean up existing dataset if it exists
-    if output_dir is not None and output_dir.exists():
-        logging.info(f"Removing existing dataset at {output_dir}")
-        shutil.rmtree(output_dir)
+    # Determine the actual output directory
+    actual_output_dir = output_dir if output_dir is not None else Path.home() / ".cache" / "huggingface" / "lerobot" / repo_id
+
+    # Handle resume mode
+    if resume:
+        logging.info("Resume mode enabled - checking for completed episodes...")
+        completed_episodes = get_completed_episodes(actual_output_dir)
+        if completed_episodes:
+            logging.info(f"Found {len(completed_episodes)} completed episodes, will skip them")
+        else:
+            logging.info("No completed episodes found, starting fresh conversion")
+    else:
+        # Clean up existing dataset if it exists and not in resume mode
+        if actual_output_dir.exists():
+            logging.info(f"Removing existing dataset at {actual_output_dir}")
+            shutil.rmtree(actual_output_dir)
+        completed_episodes = set()
 
     # Find all HDF5 files
     if not raw_dir.exists():
@@ -279,24 +351,48 @@ def port_aloha_hdf5(
     # Create dataset features
     features = get_aloha_features(cameras)
 
-    logging.info(f"Creating dataset with repo_id: {repo_id}")
-    if output_dir:
-        logging.info(f"Output directory: {output_dir}")
+    # Create or load dataset
+    if resume and actual_output_dir.exists():
+        logging.info(f"Loading existing dataset from: {actual_output_dir}")
+        # Load existing dataset for resumption
+        dataset = LeRobotDataset(repo_id=repo_id, root=output_dir)
+        logging.info(f"Loaded dataset with {len(dataset.episode_data_index)} existing episodes")
+    else:
+        logging.info(f"Creating new dataset with repo_id: {repo_id}")
+        if output_dir:
+            logging.info(f"Output directory: {output_dir}")
 
-    dataset = LeRobotDataset.create(
-        repo_id=repo_id,
-        robot_type=ALOHA_ROBOT_TYPE,
-        fps=ALOHA_FPS,
-        features=features,
-        root=output_dir,
-    )
+        dataset = LeRobotDataset.create(
+            repo_id=repo_id,
+            robot_type=ALOHA_ROBOT_TYPE,
+            fps=ALOHA_FPS,
+            features=features,
+            root=output_dir,
+        )
+
+    # Filter out completed episodes
+    if episodes is None:
+        episodes_to_process = list(range(len(hdf5_files)))
+    else:
+        episodes_to_process = episodes
+
+    if resume and completed_episodes:
+        original_count = len(episodes_to_process)
+        episodes_to_process = [ep for ep in episodes_to_process if ep not in completed_episodes]
+        skipped_count = original_count - len(episodes_to_process)
+        logging.info(f"Skipping {skipped_count} completed episodes")
+        logging.info(f"Processing {len(episodes_to_process)} remaining episodes")
+
+        if not episodes_to_process:
+            logging.info("All episodes already completed! Nothing to do.")
+            return
 
     # Populate dataset
     dataset = populate_dataset(
         dataset,
         hdf5_files,
         instruction_dir,
-        episodes=episodes,
+        episodes=episodes_to_process,
     )
 
     # Finalize dataset
@@ -354,6 +450,11 @@ def main():
         "--push-to-hub",
         action="store_true",
         help="Upload dataset to Hugging Face Hub",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume conversion from a previous interrupted run (skips completed episodes)",
     )
 
     args = parser.parse_args()
