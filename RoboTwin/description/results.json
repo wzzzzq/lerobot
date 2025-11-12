@@ -1,0 +1,202 @@
+{
+    "total_files": 43,
+    "total_verbs": 90,
+    "unique_verbs": 16,
+    "verb_distribution": {
+        "stack": 0.7066666666666666,
+        "pick": 0.588,
+        "place": 0.5821428571428572,
+        "grasp": 0.554,
+        "adjust": 0.55,
+        "beat": 0.53,
+        "move": 0.4880952380952381,
+        "lift": 0.4000000000000001,
+        "rotate": 0.4,
+        "handover": 0.135,
+        "touch": 0.1,
+        "click": 0.05,
+        "pour": 0.0,
+        "hang": 0.0,
+        "press": 0.0,
+        "scan": 0.0
+    },
+    "average_verbs_per_instruction": 2.0930232558139537,
+    "task_verbs": {
+        "BEAT_BLOCK_HAMMER": [
+            "beat",
+            "pick",
+            "place",
+            "grasp"
+        ],
+        "PICK_DUAL_BOTTLES_EASY": [
+            "move",
+            "pick"
+        ],
+        "PICK_DIVERSE_BOTTLES": [
+            "move",
+            "pick"
+        ],
+        "HANDOVER_BLOCK": [
+            "grasp",
+            "handover",
+            "move"
+        ],
+        "STACK_BLOCKS_TWO": [
+            "stack",
+            "move",
+            "pick"
+        ],
+        "STACK_BLOCKS_THREE": [
+            "stack",
+            "move",
+            "pick"
+        ],
+        "PLACE_CONTAINER_PLATE": [
+            "grasp",
+            "pick"
+        ],
+        "PLACE_EMPTY_CUP": [
+            "grasp",
+            "pick"
+        ],
+        "PLACE_SHOE": [
+            "grasp",
+            "place",
+            "pick"
+        ],
+        "PLACE_DUAL_SHOES": [
+            "place",
+            "pick"
+        ],
+        "ADJUST_BOTTLE": [
+            "pick"
+        ],
+        "BLOCKS_RANKING_RGB": [
+            "place"
+        ],
+        "BLOCKS_RANKING_SIZE": [
+            "place",
+            "move"
+        ],
+        "CLICK_BELL": [
+            "click",
+            "touch",
+            "move"
+        ],
+        "GRAB_ROLLER": [
+            "grasp",
+            "move"
+        ],
+        "LIFT_POT": [
+            "lift",
+            "move"
+        ],
+        "MOVE_CAN_POT": [
+            "place",
+            "move",
+            "pick"
+        ],
+        "MOVE_PLAYINGCARD_AWAY": [
+            "move",
+            "pick"
+        ],
+        "MOVE_STAPLER_PAD": [
+            "move"
+        ],
+        "CLICK_ALARMCLOCK": [
+            "click",
+            "move"
+        ],
+        "DUMP_BIN_BIGBIN": [
+            "grasp",
+            "pour"
+        ],
+        "HANDOVER_MIC": [
+            "grasp",
+            "move",
+            "handover"
+        ],
+        "HANGING_MUG": [
+            "rotate",
+            "move",
+            "hang",
+            "pick"
+        ],
+        "MOVE_PILLBOTTLE_PAD": [
+            "place",
+            "pick"
+        ],
+        "PLACE_A2B_LEFT": [
+            "adjust",
+            "place"
+        ],
+        "PLACE_A2B_RIGHT": [
+            "adjust",
+            "place"
+        ],
+        "PLACE_BREAD_BASKET": [
+            "grasp",
+            "place"
+        ],
+        "PLACE_BREAD_SKILLET": [
+            "grasp"
+        ],
+        "PLACE_CAN_BASKET": [
+            "lift",
+            "place",
+            "pick"
+        ],
+        "PLACE_CANS_PLASTICBOX": [
+            "place",
+            "pick"
+        ],
+        "PLACE_FAN": [
+            "grasp"
+        ],
+        "PLACE_BURGER_FRIES": [
+            "place",
+            "move",
+            "pick"
+        ],
+        "PLACE_MOUSE_PAD": [
+            "grasp"
+        ],
+        "PLACE_OBJECT_BASKET": [
+            "grasp",
+            "lift",
+            "move"
+        ],
+        "PLACE_OBJECT_SCALE": [
+            "grasp"
+        ],
+        "PLACE_OBJECT_STAND": [
+            "place"
+        ],
+        "PLACE_PHONE_STAND": [
+            "pick"
+        ],
+        "PRESS_STAPLER": [
+            "move",
+            "press"
+        ],
+        "ROTATE_QRCODE": [
+            "rotate",
+            "grasp"
+        ],
+        "SCAN_OBJECT": [
+            "scan",
+            "move",
+            "pick"
+        ],
+        "STACK_BOWLS_THREE": [
+            "move"
+        ],
+        "STACK_BOWLS_TWO": [
+            "stack",
+            "move"
+        ],
+        "STAMP_SEAL": [
+            "pick"
+        ]
+    }
+}

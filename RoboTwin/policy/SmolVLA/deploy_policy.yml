@@ -1,0 +1,20 @@
+# deploy_policy.yml for SmolVLA
+
+# [Required] Specify the path to the policy model checkpoint
+# This path will be combined with ckpt_setting to form the full path
+policy_path: /pfs/pfs-ilWc5D/ziqianwang/pretrain_place_cup/checkpoints
+
+# [Optional] Device to run the model on. Options: "cuda", "cpu".
+device: "cuda"
+
+# [Optional] Number of action steps predicted by the policy in one go.
+# This should match the model's configuration.
+n_action_steps: 8
+
+# Default task and environment settings, can be overridden by eval.sh
+task_name: "place_empty_cup"
+task_config: "randomized"
+ckpt_setting: "020000"
+seed: null
+policy_name: "SmolVLA"
+instruction_type: seen
