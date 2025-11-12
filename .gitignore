@@ -167,6 +167,9 @@ wandb/
 data/
 outputs/
 
+# Video files
+*.mp4
+
 # Translations
 *.mo
 *.pot

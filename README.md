@@ -38,11 +38,13 @@ pip install -e ".[smolvla]"
 
 ```bash
 # 转换 RoboTwin stack_blocks_two 数据集（本地保存，无需 push to hub）
+export TMPDIR=/pfs/pfs-ilWc5D/ziqianwang/tmp
 python examples/port_datasets/port_aloha_hdf5.py \
     --raw-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
     --instruction-dir /pfs/pfs-ilWc5D/VLA-MoE/Eval-RoboTwin/RoboTwin/new-clean-data/stack_blocks_two-demo_clean-700 \
     --repo-id robotwin/stack_blocks_two \
-    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two
+    --output-dir /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
+    --resume
 
 # 通用格式（替换路径）
 python examples/port_datasets/port_aloha_hdf5.py \
