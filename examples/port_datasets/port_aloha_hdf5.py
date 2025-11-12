@@ -406,7 +406,7 @@ def port_aloha_hdf5(
         logging.info(f"Loading existing dataset from: {actual_output_dir}")
         # Load existing dataset for resumption
         dataset = LeRobotDataset(repo_id=repo_id, root=output_dir)
-        logging.info(f"Loaded dataset with {len(dataset.episode_data_index)} existing episodes")
+        logging.info(f"Loaded dataset with {dataset.total_episodes} existing episodes")
     else:
         logging.info(f"Creating new dataset with repo_id: {repo_id}")
         if output_dir:
