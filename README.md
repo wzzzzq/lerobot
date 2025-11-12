@@ -59,24 +59,27 @@ python examples/port_datasets/port_aloha_hdf5.py \
 使用转换后的数据集训练 SmolVLA 模型：
 
 ```bash
-# 使用本地转换的 stack_blocks_two 数据集训练
-lerobot-train \
-    --policy-name smolvla \
-    --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
-    --output-dir outputs/smolvla_stack_blocks \
-    --num-train-iters 10000 \
-    --batch-size 8
+# 使用提供的训练脚本（推荐）
+bash examples/train_smolvla.sh
 
-# 通用格式
-lerobot-train \
-    --policy-name smolvla \
-    --repo-id myusername/aloha-dataset \
-    --root /path/to/output \
-    --output-dir outputs/smolvla_aloha \
-    --num-train-iters 10000 \
-    --batch-size 8
+# 或者直接使用命令行
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
+python src/lerobot/scripts/lerobot_train.py \
+    --policy.type=smolvla \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=robotwin/stack_blocks_two \
+    --dataset.root=/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
+    --output_dir=/pfs/pfs-ilWc5D/ziqianwang/pretrain_stack_blocks_two \
+    --steps=10000 \
+    --batch_size=8
 ```
+
+**提示**：
+- RTX 4000 系列 GPU 必须设置 `NCCL_P2P_DISABLE="1"` 和 `NCCL_IB_DISABLE="1"`
+- 可以编辑 `examples/train_smolvla.sh` 来自定义训练参数
+- 取消脚本中的注释来启用 W&B 日志记录
 
 ## 📚 详细文档
 
@@ -185,7 +188,7 @@ python examples/port_datasets/port_aloha_hdf5.py \
 ```bash
 lerobot-dataset-viz \
     --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
     --mode local \
     --episode-index 0
 ```
@@ -196,7 +199,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 dataset = LeRobotDataset(
     repo_id="robotwin/stack_blocks_two",
-    root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets"
+    root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two"
 )
 
 print(f"Total episodes: {dataset.meta.total_episodes}")
@@ -225,61 +228,119 @@ output_dir/
 
 ### 2. SmolVLA 训练
 
-#### 方法 1：使用命令行（推荐）
+#### 方法 1：使用训练脚本（推荐）
+
+**使用提供的训练脚本**：
+```bash
+# 编辑 examples/train_smolvla.sh 来配置参数
+# 然后运行：
+bash examples/train_smolvla.sh
+```
+
+**脚本配置说明**：
+- `DATASET_REPO_ID`: 数据集标识符
+- `DATASET_ROOT`: 数据集本地路径
+- `OUTPUT_DIR`: 模型输出目录
+- `CUDA_DEVICE`: 使用的 GPU 设备编号
+- `BATCH_SIZE`: 批量大小
+- `STEPS`: 训练步数
+
+取消注释 W&B 相关行来启用训练日志记录。
+
+#### 方法 2：使用命令行
 
 **基本训练**：
 ```bash
 # 使用 stack_blocks_two 数据集
-lerobot-train \
-    --policy-name smolvla \
-    --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
-    --output-dir outputs/smolvla_stack_blocks \
-    --num-train-iters 10000 \
-    --batch-size 8 \
-    --eval-freq 1000 \
-    --save-freq 1000 \
-    --log-freq 100
+# 注意：RTX 4000 系列 GPU 需要设置 NCCL 环境变量
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
+python src/lerobot/scripts/lerobot_train.py \
+    --policy.type=smolvla \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=robotwin/stack_blocks_two \
+    --dataset.root=/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
+    --output_dir=outputs/smolvla_stack_blocks \
+    --steps=10000 \
+    --batch_size=8 \
+    --eval_freq=1000 \
+    --save_freq=1000 \
+    --log_freq=100
 ```
 
 **使用 W&B 跟踪**：
 ```bash
+# 注意：RTX 4000 系列 GPU 需要设置 NCCL 环境变量
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
 wandb login
 
-lerobot-train \
-    --policy-name smolvla \
-    --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
-    --output-dir outputs/smolvla_stack_blocks \
-    --num-train-iters 10000 \
-    --batch-size 8 \
-    --use-wandb \
-    --wandb-project robotwin-training \
-    --wandb-run-name smolvla-stack-blocks-run1
+python src/lerobot/scripts/lerobot_train.py \
+    --policy.type=smolvla \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=robotwin/stack_blocks_two \
+    --dataset.root=/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
+    --output_dir=outputs/smolvla_stack_blocks \
+    --steps=10000 \
+    --batch_size=8 \
+    --wandb.enable=true \
+    --wandb.project=robotwin-training \
+    --wandb.run_id=smolvla-stack-blocks-run1
 ```
 
 **多 GPU 训练**：
 ```bash
+# 注意：RTX 4000 系列 GPU 需要设置 NCCL 环境变量
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
 accelerate launch --multi_gpu --num_processes=4 \
     src/lerobot/scripts/lerobot_train.py \
-    --policy-name smolvla \
-    --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
-    --output-dir outputs/smolvla_stack_blocks \
-    --num-train-iters 10000 \
-    --batch-size 32
+    --policy.type=smolvla \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=robotwin/stack_blocks_two \
+    --dataset.root=/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
+    --output_dir=outputs/smolvla_stack_blocks \
+    --steps=10000 \
+    --batch_size=32
 ```
 
 **从预训练模型微调**：
 ```bash
-lerobot-train \
-    --policy-name smolvla \
-    --pretrained-model-path lerobot/smolvla_base \
-    --repo-id myuser/aloha-dataset \
-    --root /path/to/output \
-    --output-dir outputs/smolvla_aloha_finetuned \
-    --num-train-iters 5000 \
-    --batch-size 8
+# 注意：RTX 4000 系列 GPU 需要设置 NCCL 环境变量
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
+python src/lerobot/scripts/lerobot_train.py \
+    --policy.type=smolvla \
+    --policy.pretrained_path=lerobot/smolvla_base \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=myuser/aloha-dataset \
+    --dataset.root=/path/to/output \
+    --output_dir=outputs/smolvla_aloha_finetuned \
+    --steps=5000 \
+    --batch_size=8
+```
+
+#### 方法 3：使用 Python 脚本
+
+**从预训练模型微调**：
+```bash
+# 注意：RTX 4000 系列 GPU 需要设置 NCCL 环境变量
+export NCCL_P2P_DISABLE="1"
+export NCCL_IB_DISABLE="1"
+
+python src/lerobot/scripts/lerobot_train.py \
+    --policy.type=smolvla \
+    --policy.pretrained_path=lerobot/smolvla_base \
+    --policy.push_to_hub=false \
+    --dataset.repo_id=myuser/aloha-dataset \
+    --dataset.root=/path/to/output \
+    --output_dir=outputs/smolvla_aloha_finetuned \
+    --steps=5000 \
+    --batch_size=8
 ```
 
 #### 方法 2：使用 Python 脚本
@@ -309,7 +370,7 @@ def main():
     # 加载数据集元数据
     dataset_metadata = LeRobotDatasetMetadata(
         repo_id="robotwin/stack_blocks_two",
-        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets"
+        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two"
     )
 
     # 准备特征配置
@@ -341,7 +402,7 @@ def main():
     # 加载数据集
     dataset = LeRobotDataset(
         repo_id="robotwin/stack_blocks_two",
-        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets",
+        root="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two",
         delta_timestamps=delta_timestamps
     )
 
@@ -504,12 +565,13 @@ pip install opencv-python-headless
 
 **A**: 减小批量大小：
 ```bash
-lerobot-train --batch-size 4 ...
+python src/lerobot/scripts/lerobot_train.py --batch_size=4 ...
 ```
 
 或使用梯度累积：
 ```bash
-lerobot-train --batch-size 4 --gradient-accumulation-steps 2 ...
+# LeRobot 使用 gradient_accumulation_steps 需要通过配置文件设置
+python src/lerobot/scripts/lerobot_train.py --batch_size=4 ...
 ```
 
 ### Q3: 如何查看可用的摄像头？
@@ -536,8 +598,9 @@ print("Available cameras:", meta.video_keys)
 
 **A**: 使用 checkpoint 恢复：
 ```bash
-lerobot-train \
-    --resume-from outputs/smolvla_aloha/checkpoint-5000 \
+python src/lerobot/scripts/lerobot_train.py \
+    --resume=true \
+    --checkpoint_path=outputs/smolvla_aloha/checkpoint-5000 \
     ...其他参数...
 ```
 
@@ -592,20 +655,13 @@ python examples/port_datasets/port_aloha_hdf5.py \
 # 4. 验证数据集
 lerobot-dataset-viz \
     --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
+    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two \
     --mode local \
     --episode-index 0
 
-# 5. 训练 SmolVLA
-lerobot-train \
-    --policy-name smolvla \
-    --repo-id robotwin/stack_blocks_two \
-    --root /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets \
-    --output-dir outputs/smolvla_stack_blocks \
-    --num-train-iters 10000 \
-    --batch-size 8 \
-    --use-wandb \
-    --wandb-project robotwin-training
+# 5. 训练 SmolVLA（使用提供的脚本）
+# 编辑 examples/train_smolvla.sh 配置参数，然后运行：
+bash examples/train_smolvla.sh
 
 # 6. 评估模型
 lerobot-eval \

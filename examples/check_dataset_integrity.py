@@ -1,13 +1,30 @@
 #!/usr/bin/env python
 
 """
-LeRobot Dataset Integrity Checker
+LeRobot Dataset Integrity Checker (v3.0)
 
 This script checks the integrity of a LeRobot v3.0 dataset by:
 1. Verifying all video files can be decoded completely
 2. Checking all parquet data files are readable
 3. Validating metadata consistency
 4. Checking episode completeness
+
+LeRobot v3.0 Dataset Structure:
+    dataset_root/
+    ├── data/
+    │   └── chunk-000/
+    │       └── file-000.parquet
+    ├── videos/
+    │   └── observation.images.{camera}/
+    │       └── chunk-000/
+    │           └── file-000.mp4
+    └── meta/
+        ├── info.json
+        ├── stats.json
+        ├── tasks.parquet          # ← directly in meta/
+        └── episodes/
+            └── chunk-000/
+                └── file-000.parquet
 
 Usage:
     python examples/check_dataset_integrity.py \
@@ -79,7 +96,6 @@ class DatasetIntegrityChecker:
             "data",
             "meta",
             "meta/episodes",
-            "meta/tasks",
         ]
 
         all_exist = True
@@ -301,34 +317,23 @@ class DatasetIntegrityChecker:
         return True
 
     def check_tasks_metadata(self) -> bool:
-        """Check task metadata."""
+        """Check task metadata in v3.0 format (tasks.parquet in meta/ directory)."""
         print("\n🔍 Checking task metadata...")
 
-        tasks_dir = self.dataset_dir / "meta" / "tasks"
-        if not tasks_dir.exists():
-            self.add_warning("Tasks metadata directory not found")
+        # v3.0 format: tasks.parquet is directly in meta/ directory
+        tasks_file = self.dataset_dir / "meta" / "tasks.parquet"
+        
+        if not tasks_file.exists():
+            self.add_warning("Tasks metadata file not found (meta/tasks.parquet)")
             return True
-
-        # Find all task parquet files
-        task_files = list(tasks_dir.rglob("*.parquet"))
-
-        if not task_files:
-            self.add_warning("No task metadata files found")
+        
+        try:
+            tasks_df = pd.read_parquet(tasks_file)
+            print(f"✅ Found {len(tasks_df)} tasks")
             return True
-
-        # Read all task metadata
-        all_tasks = []
-        for task_file in task_files:
-            try:
-                df = pd.read_parquet(task_file)
-                all_tasks.append(df)
-            except Exception as e:
-                self.add_error(f"Failed to read task metadata: {e}", task_file)
-                return False
-
-        tasks_df = pd.concat(all_tasks, ignore_index=True)
-        print(f"✅ Found {len(tasks_df)} tasks")
-        return True
+        except Exception as e:
+            self.add_error(f"Failed to read task metadata: {e}", tasks_file)
+            return False
 
     def print_summary(self):
         """Print final summary."""
