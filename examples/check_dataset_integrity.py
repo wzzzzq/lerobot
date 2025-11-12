@@ -4,32 +4,17 @@
 LeRobot Dataset Integrity Checker
 
 This script checks the integrity of a LeRobot v3.0 dataset by:
-1. Verifying all video files (MP4) can be decoded completely
-2. Checking all PNG image files are readable (if using images/ directory)
-3. Checking all parquet data files are readable
-4. Validating metadata consistency
-5. Checking episode completeness
-
-Supported dataset structures:
-- videos/: H264-encoded MP4 files (recommended for large datasets)
-- images/: PNG image files (optional, for smaller datasets)
-- meta/tasks.parquet: Single task metadata file (v3.0 format)
-- meta/tasks/: Directory with task parquet files (alternative format)
+1. Verifying all video files can be decoded completely
+2. Checking all parquet data files are readable
+3. Validating metadata consistency
+4. Checking episode completeness
 
 Usage:
-    # Full check (videos + images + data + metadata)
-    python examples/check_dataset_integrity.py \
-        --dataset-dir /path/to/dataset
-
-    # Skip video checks (if no PyAV)
     python examples/check_dataset_integrity.py \
         --dataset-dir /path/to/dataset \
-        --skip-videos
-
-    # Skip image checks (if dataset uses only videos)
-    python examples/check_dataset_integrity.py \
-        --dataset-dir /path/to/dataset \
-        --skip-images
+        --check-videos \
+        --check-data \
+        --check-metadata
 """
 
 import argparse
@@ -94,6 +79,7 @@ class DatasetIntegrityChecker:
             "data",
             "meta",
             "meta/episodes",
+            "meta/tasks",
         ]
 
         all_exist = True
@@ -213,51 +199,6 @@ class DatasetIntegrityChecker:
             print("✅ All video files are valid")
             return True
 
-    def check_images(self) -> bool:
-        """Check integrity of PNG image files."""
-        print("\n🔍 Checking image files...")
-
-        images_dir = self.dataset_dir / "images"
-        if not images_dir.exists():
-            print("ℹ️  No images directory found (dataset may use videos instead)")
-            return True
-
-        # Find all PNG image files
-        image_files = list(images_dir.rglob("*.png"))
-
-        if not image_files:
-            print("ℹ️  No PNG image files found")
-            return True
-
-        print(f"📂 Found {len(image_files)} image files")
-
-        corrupted_images = []
-
-        # Check each image file
-        for img_path in tqdm(image_files, desc="Checking images"):
-            try:
-                from PIL import Image
-                with Image.open(img_path) as img:
-                    # Try to load the image data
-                    img.verify()
-                # Re-open after verify (verify closes the file)
-                with Image.open(img_path) as img:
-                    img.load()
-            except Exception as e:
-                error_info = f"{type(e).__name__}: {str(e)}"
-                corrupted_images.append((img_path, error_info))
-                tqdm.write(f"❌ Corrupted image: {img_path.relative_to(self.dataset_dir)}")
-
-        if corrupted_images:
-            print(f"\n❌ Found {len(corrupted_images)} corrupted image files:")
-            for path, error in corrupted_images:
-                print(f"   - {path.relative_to(self.dataset_dir)}")
-                print(f"     Error: {error}")
-            return False
-        else:
-            print("✅ All image files are valid")
-            return True
-
     def check_data_files(self) -> bool:
         """Check integrity of all parquet data files."""
         print("\n🔍 Checking data files...")
@@ -363,45 +304,31 @@ class DatasetIntegrityChecker:
         """Check task metadata."""
         print("\n🔍 Checking task metadata...")
 
-        # Check for tasks.parquet file (v3.0 format)
-        tasks_file = self.dataset_dir / "meta" / "tasks.parquet"
-
-        # Also check for tasks directory (alternative format)
         tasks_dir = self.dataset_dir / "meta" / "tasks"
+        if not tasks_dir.exists():
+            self.add_warning("Tasks metadata directory not found")
+            return True
 
-        if tasks_file.exists():
-            # Single tasks.parquet file
+        # Find all task parquet files
+        task_files = list(tasks_dir.rglob("*.parquet"))
+
+        if not task_files:
+            self.add_warning("No task metadata files found")
+            return True
+
+        # Read all task metadata
+        all_tasks = []
+        for task_file in task_files:
             try:
-                tasks_df = pd.read_parquet(tasks_file)
-                print(f"✅ Found {len(tasks_df)} tasks in tasks.parquet")
-                return True
+                df = pd.read_parquet(task_file)
+                all_tasks.append(df)
             except Exception as e:
-                self.add_error(f"Failed to read task metadata: {e}", tasks_file)
+                self.add_error(f"Failed to read task metadata: {e}", task_file)
                 return False
-        elif tasks_dir.exists():
-            # Directory with multiple parquet files
-            task_files = list(tasks_dir.rglob("*.parquet"))
 
-            if not task_files:
-                self.add_warning("Tasks directory exists but contains no parquet files")
-                return True
-
-            # Read all task metadata
-            all_tasks = []
-            for task_file in task_files:
-                try:
-                    df = pd.read_parquet(task_file)
-                    all_tasks.append(df)
-                except Exception as e:
-                    self.add_error(f"Failed to read task metadata: {e}", task_file)
-                    return False
-
-            tasks_df = pd.concat(all_tasks, ignore_index=True)
-            print(f"✅ Found {len(tasks_df)} tasks in {len(task_files)} files")
-            return True
-        else:
-            self.add_warning("No task metadata found (neither tasks.parquet nor tasks/ directory)")
-            return True
+        tasks_df = pd.concat(all_tasks, ignore_index=True)
+        print(f"✅ Found {len(tasks_df)} tasks")
+        return True
 
     def print_summary(self):
         """Print final summary."""
@@ -435,7 +362,6 @@ class DatasetIntegrityChecker:
     def run_checks(
         self,
         check_videos: bool = True,
-        check_images: bool = True,
         check_data: bool = True,
         check_metadata: bool = True,
     ) -> bool:
@@ -458,11 +384,6 @@ class DatasetIntegrityChecker:
         # Check videos
         if check_videos:
             if not self.check_videos():
-                all_passed = False
-
-        # Check images (PNG files)
-        if check_images:
-            if not self.check_images():
                 all_passed = False
 
         # Check data files
@@ -516,11 +437,6 @@ def main():
         action="store_true",
         help="Skip video checks",
     )
-    parser.add_argument(
-        "--skip-images",
-        action="store_true",
-        help="Skip image (PNG) checks",
-    )
 
     args = parser.parse_args()
 
@@ -533,10 +449,8 @@ def main():
 
     # Run checks
     check_videos = args.check_videos and not args.skip_videos
-    check_images = not args.skip_images
     success = checker.run_checks(
         check_videos=check_videos,
-        check_images=check_images,
         check_data=args.check_data,
         check_metadata=args.check_metadata,
     )
