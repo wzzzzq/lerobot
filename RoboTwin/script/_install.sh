@@ -47,12 +47,12 @@ MPLIB_LOCATION=$(pip show mplib | grep 'Location' | awk '{print $2}')/mplib
 PLANNER=$MPLIB_LOCATION/planner.py
 sed -i -E 's/(if np.linalg.norm\(delta_twist\) < 1e-4 )(or collide )(or not within_joint_limit:)/\1\3/g' $PLANNER
 
-echo "Installing Curobo ..."
-cd envs
-git clone https://github.com/NVlabs/curobo.git
-cd curobo
-pip install -e . --no-build-isolation
-cd ../..
+#echo "Installing Curobo ..."
+#cd envs
+#git clone https://github.com/NVlabs/curobo.git
+#cd curobo
+#pip install -e . --no-build-isolation
+#cd ../..
 
 echo "Installation basic environment complete!"
 echo -e "You need to:"

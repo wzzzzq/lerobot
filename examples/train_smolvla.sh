@@ -18,10 +18,10 @@ export WANDB_API_KEY="489fe7b734df1e91930d434d63c36b600b2faed9"
 RUN_ID="smolvla_$(date +%Y%m%d_%H%M%S)"
 
 # Training configuration
-DATASET_REPO_ID="robotwin/stack_blocks_two"
-DATASET_ROOT="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/stack_blocks_two"
-OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/pretrain_stack_blocks_two"
-CUDA_DEVICE="0"
+DATASET_REPO_ID="name/aloha_agix_sim"
+DATASET_ROOT="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/name/aloha_agilex_sim/put_bottles_dustbin_v30"
+OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin"
+CUDA_DEVICE="1"
 BATCH_SIZE="32"
 STEPS="50000"
 

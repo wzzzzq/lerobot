@@ -58,19 +58,17 @@ class SmolVLAWrapper:
             state: Robot joint state vector
         """
         def prepare_img(img):
-            # Convert HWC to CHW, add batch dimension, normalize to [0, 1]
+            # Convert HWC to CHW, normalize to [0, 1]
             img = np.transpose(img, (2, 0, 1))
-            img = img[np.newaxis, ...]
             img = img.astype(np.float32) / 255.0
             return torch.from_numpy(img)
 
         state_tensor = torch.from_numpy(np.array(state, dtype=np.float32))
-        state_tensor = state_tensor.unsqueeze(0).to(self.device)
 
-        # Build observation dict
-        self.observation_window = {
+        # Build observation dict (without batch dimension - preprocessor will add it)
+        observation = {
             "observation.state": state_tensor,
-            "task": [self.instruction] if isinstance(self.instruction, str) else self.instruction,
+            "task": self.instruction if isinstance(self.instruction, str) else self.instruction[0],
         }
 
         # Camera names (matching RoboTwin's order)
@@ -80,7 +78,11 @@ class SmolVLAWrapper:
         for i, camera_name in enumerate(camera_names):
             if i < len(img_arr):
                 key = f"observation.images.{camera_name}"
-                self.observation_window[key] = prepare_img(img_arr[i]).to(self.device)
+                observation[key] = prepare_img(img_arr[i])
+
+        # Use the policy's preprocessor to process the observation
+        # This will add batch dimension, tokenize language, and normalize
+        self.observation_window = self.policy.preprocessor(observation)
 
     def get_action(self) -> np.ndarray:
         """Get action from the policy."""
@@ -388,7 +390,7 @@ def main(usr_args: Dict):
 
     # Setup embodiment configuration
     embodiment_type = args.get("embodiment")
-    embodiment_config_path = CONFIGS_PATH / "_embodiment_config.yml"
+    embodiment_config_path = Path(CONFIGS_PATH) / "_embodiment_config.yml"
 
     with open(embodiment_config_path, "r", encoding="utf-8") as f:
         _embodiment_types = yaml.load(f.read(), Loader=yaml.FullLoader)
@@ -400,7 +402,7 @@ def main(usr_args: Dict):
         return robot_file
 
     # Setup camera configuration
-    camera_config_path = CONFIGS_PATH / "_camera_config.yml"
+    camera_config_path = Path(CONFIGS_PATH) / "_camera_config.yml"
     with open(camera_config_path, "r", encoding="utf-8") as f:
         _camera_config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
@@ -530,7 +532,7 @@ def parse_args_and_config():
 
 if __name__ == "__main__":
     # Test SAPIEN rendering
-    from test_render import Sapien_TEST
+    from script.test_render import Sapien_TEST
     Sapien_TEST()
 
     usr_args = parse_args_and_config()

@@ -13,7 +13,7 @@
 # ==========================
 
 # Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/pretrain_put_bottles_dustbin/checkpoints"
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
 
 # Task settings
@@ -26,13 +26,13 @@ SEED=42
 INSTRUCTION_TYPE="seen"  # Options: "seen", "unseen"
 
 # GPU settings
-GPU_ID=3
+GPU_ID=0
 export CUDA_VISIBLE_DEVICES=${GPU_ID}
 
 # Environment variables (optional)
-# export TMPDIR=/pfs/pfs-ilWc5D/ziqianwang/tmp
-# export http_proxy=http://172.16.0.136:18000
-# export https_proxy=http://172.16.0.136:18000
+export TMPDIR=/pfs/pfs-ilWc5D/ziqianwang/tmp
+export http_proxy=http://172.16.0.136:18000
+export https_proxy=http://172.16.0.136:18000
 
 # ==========================
 # Script Start
