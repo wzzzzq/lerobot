@@ -40,9 +40,10 @@ import subprocess
 class SmolVLAWrapper:
     """Wrapper to adapt main lerobot SmolVLA for RoboTwin interface."""
 
-    def __init__(self, policy: SmolVLAPolicy, preprocessor, device: str = "cuda"):
+    def __init__(self, policy: SmolVLAPolicy, preprocessor, postprocessor, device: str = "cuda"):
         self.policy = policy
         self.preprocessor = preprocessor
+        self.postprocessor = postprocessor
         self.device = device
         self.observation_window = None
         self.instruction = None
@@ -87,17 +88,27 @@ class SmolVLAWrapper:
         self.observation_window = self.preprocessor(observation)
 
     def get_action(self) -> np.ndarray:
-        """Get action from the policy."""
-        assert self.observation_window is not None, "Call update_observation_window first!"
+        """Get action and apply postprocessor for denormalization."""
+        if self.observation_window is None:
+            raise ValueError("Must call update_observation_window() first!")
 
+        # Get normalized action from policy (returns Tensor)
         action_tensor = self.policy.select_action(self.observation_window)
-        action_numpy = action_tensor.cpu().numpy().squeeze(0)
+
+        # Apply postprocessor to denormalize action (Tensor → Tensor)
+        # Note: PolicyAction is just a type alias for torch.Tensor, not a class
+        action_denormalized = self.postprocessor(action_tensor)
+
+        # Extract action numpy array
+        action_numpy = action_denormalized.cpu().numpy().squeeze(0)
 
         return action_numpy
 
     def reset(self):
         """Reset internal state."""
         self.observation_window = None
+        self.instruction = None
+        self.policy.reset()  # Reset policy's internal queues
 
 
 def load_model(usr_args: Dict) -> SmolVLAWrapper:
@@ -138,9 +149,10 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
         policy_cfg=policy.config,
         pretrained_path=policy_path,
     )
+    print("✓ Successfully loaded preprocessor and postprocessor")
 
     # Wrap policy for RoboTwin interface
-    model = SmolVLAWrapper(policy, preprocessor, device=device)
+    model = SmolVLAWrapper(policy, preprocessor, postprocessor, device=device)
     return model
 
 
