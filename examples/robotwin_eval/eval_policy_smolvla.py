@@ -27,7 +27,6 @@ sys.path.insert(0, str(ROBOTWIN_ROOT / "description" / "utils"))
 # Import from main lerobot (not nested copy)
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.policies.factory import make_pre_post_processors
-from lerobot.processor import PolicyAction
 
 # Import RoboTwin components
 from envs import CONFIGS_PATH
@@ -93,15 +92,15 @@ class SmolVLAWrapper:
         if self.observation_window is None:
             raise ValueError("Must call update_observation_window() first!")
 
-        # Get normalized action from policy
+        # Get normalized action from policy (returns Tensor)
         action_tensor = self.policy.select_action(self.observation_window)
 
-        # Apply postprocessor to denormalize action (CRITICAL!)
-        policy_action = PolicyAction(action=action_tensor)
-        denormalized_action = self.postprocessor(policy_action)
+        # Apply postprocessor to denormalize action (Tensor → Tensor)
+        # Note: PolicyAction is just a type alias for torch.Tensor, not a class
+        action_denormalized = self.postprocessor(action_tensor)
 
         # Extract action numpy array
-        action_numpy = denormalized_action.action.cpu().numpy().squeeze(0)
+        action_numpy = action_denormalized.cpu().numpy().squeeze(0)
 
         return action_numpy
 

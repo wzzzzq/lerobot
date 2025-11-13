@@ -1,7 +1,6 @@
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.factory import make_pre_post_processors
-from lerobot.processor import PolicyAction
 import torch
 from torch import Tensor
 import numpy as np
@@ -104,15 +103,15 @@ class SmolVLA(SmolVLAPolicy):
                 "SmolVLA.from_pretrained() to include preprocessor and postprocessor."
             )
 
-        # Get normalized action from policy
+        # Get normalized action from policy (returns Tensor)
         action_tensor = self.select_action(self.observation_window)
 
-        # Apply postprocessor to denormalize action (CRITICAL!)
-        policy_action = PolicyAction(action=action_tensor)
-        denormalized_action = self.postprocessor(policy_action)
+        # Apply postprocessor to denormalize action (Tensor → Tensor)
+        # Note: PolicyAction is just a type alias for torch.Tensor, not a class
+        action_denormalized = self.postprocessor(action_tensor)
 
         # Extract action numpy array
-        action_numpy = denormalized_action.action.cpu().numpy().squeeze(0)
+        action_numpy = action_denormalized.cpu().numpy().squeeze(0)
 
         return action_numpy
 
