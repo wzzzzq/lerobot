@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROBOTWIN_ROOT / "description" / "utils"))
 
 # Import from main lerobot (not nested copy)
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK
 
 # Import RoboTwin components
 from envs import CONFIGS_PATH
@@ -44,10 +45,30 @@ class SmolVLAWrapper:
         self.device = device
         self.observation_window = None
         self.instruction = None
+        self.tokenized_instruction = None
+
+        # Access tokenizer from the policy's VLM model
+        self.tokenizer = self.policy.model.vlm_with_expert.processor.tokenizer
+        self.max_length = self.policy.config.tokenizer_max_length
 
     def set_language(self, instruction: str):
-        """Set the language instruction."""
+        """Set the language instruction and tokenize it."""
         self.instruction = instruction
+
+        # Tokenize the instruction
+        tokenized = self.tokenizer(
+            instruction,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt",
+        )
+
+        # Move to device and store
+        self.tokenized_instruction = {
+            "input_ids": tokenized["input_ids"].to(self.device),
+            "attention_mask": tokenized["attention_mask"].to(self.device),
+        }
 
     def update_observation_window(self, img_arr: list, state: np.ndarray):
         """
@@ -57,6 +78,9 @@ class SmolVLAWrapper:
             img_arr: List of images [head_camera, right_camera, left_camera, front_camera]
             state: Robot joint state vector
         """
+        if self.tokenized_instruction is None:
+            raise ValueError("Must call set_language() before update_observation_window()")
+
         def prepare_img(img):
             # Convert HWC to CHW, add batch dimension, normalize to [0, 1]
             img = np.transpose(img, (2, 0, 1))
@@ -67,10 +91,11 @@ class SmolVLAWrapper:
         state_tensor = torch.from_numpy(np.array(state, dtype=np.float32))
         state_tensor = state_tensor.unsqueeze(0).to(self.device)
 
-        # Build observation dict
+        # Build observation dict with tokenized language
         self.observation_window = {
             "observation.state": state_tensor,
-            "task": [self.instruction] if isinstance(self.instruction, str) else self.instruction,
+            OBS_LANGUAGE_TOKENS: self.tokenized_instruction["input_ids"],
+            OBS_LANGUAGE_ATTENTION_MASK: self.tokenized_instruction["attention_mask"],
         }
 
         # Camera names (matching RoboTwin's order)
@@ -94,6 +119,8 @@ class SmolVLAWrapper:
     def reset(self):
         """Reset internal state."""
         self.observation_window = None
+        self.tokenized_instruction = None
+        self.policy.reset()  # Reset policy's internal queues
 
 
 def load_model(usr_args: Dict) -> SmolVLAWrapper:
