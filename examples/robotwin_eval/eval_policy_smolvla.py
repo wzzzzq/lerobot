@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROBOTWIN_ROOT / "description" / "utils"))
 
 # Import from main lerobot (not nested copy)
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.policies.factory import make_pre_post_processors
 
 # Import RoboTwin components
 from envs import CONFIGS_PATH
@@ -39,8 +40,9 @@ import subprocess
 class SmolVLAWrapper:
     """Wrapper to adapt main lerobot SmolVLA for RoboTwin interface."""
 
-    def __init__(self, policy: SmolVLAPolicy, device: str = "cuda"):
+    def __init__(self, policy: SmolVLAPolicy, preprocessor, device: str = "cuda"):
         self.policy = policy
+        self.preprocessor = preprocessor
         self.device = device
         self.observation_window = None
         self.instruction = None
@@ -54,7 +56,7 @@ class SmolVLAWrapper:
         Build observation window from images and state.
 
         Args:
-            img_arr: List of images [head_camera, right_camera, left_camera, front_camera]
+            img_arr: List of images [head_camera, left_camera, right_camera] (matching training data order)
             state: Robot joint state vector
         """
         def prepare_img(img):
@@ -71,8 +73,8 @@ class SmolVLAWrapper:
             "task": self.instruction if isinstance(self.instruction, str) else self.instruction[0],
         }
 
-        # Camera names (matching RoboTwin's order)
-        camera_names = ["head_camera", "right_camera", "left_camera", "front_camera"]
+        # Camera names - MUST match training data order: head, left, right (NO front_camera)
+        camera_names = ["head_camera", "left_camera", "right_camera"]
 
         # Add each camera to observation
         for i, camera_name in enumerate(camera_names):
@@ -82,7 +84,7 @@ class SmolVLAWrapper:
 
         # Use the policy's preprocessor to process the observation
         # This will add batch dimension, tokenize language, and normalize
-        self.observation_window = self.policy.preprocessor(observation)
+        self.observation_window = self.preprocessor(observation)
 
     def get_action(self) -> np.ndarray:
         """Get action from the policy."""
@@ -129,18 +131,29 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
 
     print(f"✓ Successfully loaded model from: {policy_path}")
 
+    # Create preprocessor and postprocessor from the pretrained checkpoint
+    # This will load the saved normalization statistics
+    print("Loading preprocessor and postprocessor from checkpoint...")
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=policy.config,
+        pretrained_path=policy_path,
+    )
+
     # Wrap policy for RoboTwin interface
-    model = SmolVLAWrapper(policy, device=device)
+    model = SmolVLAWrapper(policy, preprocessor, device=device)
     return model
 
 
 def encode_obs(observation: Dict) -> tuple:
-    """Extract images and state from RoboTwin observation."""
+    """Extract images and state from RoboTwin observation.
+    
+    Returns images in the order: [head_camera, left_camera, right_camera]
+    This MUST match the training data camera order.
+    """
     input_rgb_arr = [
         observation["observation"]["head_camera"]["rgb"],
-        observation["observation"]["right_camera"]["rgb"],
         observation["observation"]["left_camera"]["rgb"],
-        observation["observation"]["front_camera"]["rgb"],
+        observation["observation"]["right_camera"]["rgb"],
     ]
     input_state = observation["joint_action"]["vector"]
     return input_rgb_arr, input_state

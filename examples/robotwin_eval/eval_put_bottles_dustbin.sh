@@ -25,8 +25,14 @@ NUM_EPISODES=10  # Number of episodes to evaluate
 SEED=42
 INSTRUCTION_TYPE="seen"  # Options: "seen", "unseen"
 
+# NOTE: These settings MUST match training config (from config.json):
+# - n_action_steps: 50 (chunk_size from training)
+# - tokenizer_max_length: 48 (from training config)
+N_ACTION_STEPS=50
+TOKENIZER_MAX_LENGTH=48
+
 # GPU settings
-GPU_ID=0
+GPU_ID=1
 export CUDA_VISIBLE_DEVICES=${GPU_ID}
 
 # Environment variables (optional)
@@ -80,11 +86,11 @@ instruction_type: ${INSTRUCTION_TYPE}
 # Evaluation settings
 num_episodes: ${NUM_EPISODES}
 seed: ${SEED}
-n_action_steps: 10
+n_action_steps: ${N_ACTION_STEPS}
 
-# Model settings (for compatibility)
+# Model settings (MUST match training config)
 policy_name: SmolVLA
-tokenizer_max_length: 96
+tokenizer_max_length: ${TOKENIZER_MAX_LENGTH}
 EOF
 
 echo "Config file created: ${CONFIG_FILE}"
