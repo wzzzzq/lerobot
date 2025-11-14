@@ -20,15 +20,16 @@ RUN_ID="smolvla_$(date +%Y%m%d_%H%M%S)"
 # Training configuration
 DATASET_REPO_ID="name/aloha_agix_sim"
 DATASET_ROOT="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/name/aloha_agilex_sim/put_bottles_dustbin_v30"
-OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin"
-CUDA_DEVICE="1"
+OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_vlm"
+CUDA_DEVICE="3"
 BATCH_SIZE="32"
-STEPS="50000"
+STEPS="100000"
 
 # Run training
 CUDA_VISIBLE_DEVICES=${CUDA_DEVICE} python src/lerobot/scripts/lerobot_train.py \
     --policy.type=smolvla \
     --policy.push_to_hub=false \
+    --policy.train_expert_only=false \
     --dataset.repo_id=${DATASET_REPO_ID} \
     --dataset.root=${DATASET_ROOT} \
     --output_dir=${OUTPUT_DIR} \

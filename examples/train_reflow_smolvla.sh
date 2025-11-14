@@ -33,7 +33,7 @@ LEARNING_RATE=1e-4
 OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow"
 
 # Hardware
-GPU_ID=1
+GPU_ID=2
 
 # ============================================================================
 # Validation
@@ -79,7 +79,7 @@ CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train.py \
   --policy.teacher_model_path="$TEACHER_MODEL_PATH" \
   --policy.load_vlm_weights=false \
   --policy.freeze_vision_encoder=true \
-  --policy.train_expert_only=false \
+  --policy.train_expert_only=true \
   --policy.optimizer_lr=$LEARNING_RATE \
   --dataset.repo_id="$DATASET_REPO_ID" \
   --dataset.root="$DATASET_ROOT" \

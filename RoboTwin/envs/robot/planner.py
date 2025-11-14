@@ -194,7 +194,7 @@ try:
         ):
             super().__init__()
             ta.setup_logging("CRITICAL")  # hide logging
-            logger.setup_logger(level="error", logger_name="'curobo")
+            logger.setup_logger(level="error", logger_name="curobo")
 
             if yml_path != None:
                 self.yml_path = yml_path
