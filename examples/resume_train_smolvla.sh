@@ -20,37 +20,45 @@ DATASET_ROOT="/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/name/aloha_agilex_sim/
 OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin"
 CUDA_DEVICE="1"
 BATCH_SIZE="32"
-STEPS="50000"
+STEPS="100000"
 
 # Resume configuration
-# IMPORTANT: Set this to the checkpoint directory you want to resume from
-# Format: OUTPUT_DIR/checkpoints/step_XXXXXX
-# Example: /pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints/step_025000
-CHECKPOINT_PATH="${OUTPUT_DIR}/checkpoints/last"  # Uses the last checkpoint by default
+# IMPORTANT: When using --resume true, you need to specify:
+# 1. --output_dir: Directory containing the checkpoints folder
+# 2. --config_path: Path to train_config.json from the checkpoint you want to resume from
 
-# Verify checkpoint exists
-if [ ! -d "${CHECKPOINT_PATH}" ]; then
-    echo "Error: Checkpoint directory does not exist: ${CHECKPOINT_PATH}"
-    echo "Please set CHECKPOINT_PATH to a valid checkpoint directory."
-    echo "Available checkpoints in ${OUTPUT_DIR}/checkpoints:"
-    ls -d ${OUTPUT_DIR}/checkpoints/*/ 2>/dev/null || echo "  (none found)"
+# Find the latest checkpoint
+LATEST_CHECKPOINT=$(ls -d ${OUTPUT_DIR}/checkpoints/*/ | grep -v "last" | sort -V | tail -1)
+LATEST_CHECKPOINT=$(basename ${LATEST_CHECKPOINT})
+
+# Construct config path
+CONFIG_PATH="${OUTPUT_DIR}/checkpoints/${LATEST_CHECKPOINT}/pretrained_model/train_config.json"
+
+# Verify paths exist
+if [ ! -d "${OUTPUT_DIR}/checkpoints" ]; then
+    echo "Error: Checkpoints directory does not exist: ${OUTPUT_DIR}/checkpoints"
+    echo "Please set OUTPUT_DIR to a directory containing a checkpoints folder."
     exit 1
 fi
 
-echo "Resuming training from checkpoint: ${CHECKPOINT_PATH}"
+if [ ! -f "${CONFIG_PATH}" ]; then
+    echo "Error: train_config.json not found at: ${CONFIG_PATH}"
+    echo "Available checkpoints:"
+    ls -d ${OUTPUT_DIR}/checkpoints/*/ 2>/dev/null
+    exit 1
+fi
+
+echo "Available checkpoints:"
+ls -d ${OUTPUT_DIR}/checkpoints/*/ 2>/dev/null
+echo ""
+echo "Resuming training from checkpoint: ${LATEST_CHECKPOINT}"
+echo "Using config: ${CONFIG_PATH}"
+echo "Output directory: ${OUTPUT_DIR}"
 
 # Run training with resume flag
+# NOTE: You must specify both --resume true and --config_path
 CUDA_VISIBLE_DEVICES=${CUDA_DEVICE} python src/lerobot/scripts/lerobot_train.py \
-    --policy.type=smolvla \
-    --policy.push_to_hub=false \
-    --dataset.repo_id=${DATASET_REPO_ID} \
-    --dataset.root=${DATASET_ROOT} \
+    --config_path=${CONFIG_PATH} \
     --output_dir=${OUTPUT_DIR} \
     --steps=${STEPS} \
-    --batch_size=${BATCH_SIZE} \
-    --wandb.enable=true \
-    --wandb.project=aloha_smolvla \
-    --wandb.entity=christianwang-sjtu \
-    --wandb.mode=online \
-    --resume=true \
-    --checkpoint_path=${CHECKPOINT_PATH}
+    --resume=true
