@@ -718,9 +718,13 @@ class VLAFlowMatching(nn.Module):
             images, img_masks, lang_tokens, lang_masks, state=state
         )
 
+        # Create position_ids and attention_mask from prefix masks
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
         _, past_key_values = teacher.model.vlm_with_expert.forward(
-            attention_mask=None,
-            position_ids=None,
+            attention_mask=prefix_att_2d_masks,
+            position_ids=prefix_position_ids,
             past_key_values=None,
             inputs_embeds=[prefix_embs, None],
             use_cache=True,
