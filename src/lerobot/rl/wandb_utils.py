@@ -137,6 +137,27 @@ class WandBLogger:
                 self._wandb.define_metric(new_custom_key, hidden=True)
 
         for k, v in d.items():
+            # Convert torch.Tensor to scalar if possible
+            if hasattr(v, '__class__') and 'torch' in str(type(v).__module__):
+                try:
+                    # Try to convert tensor to scalar
+                    if hasattr(v, 'numel') and v.numel() == 1:
+                        v = v.item()
+                    elif hasattr(v, 'numel') and v.numel() == 0:
+                        # Skip empty tensors
+                        continue
+                    else:
+                        # Multi-element tensor - skip with warning
+                        logging.warning(
+                            f'WandB logging of key "{k}" was ignored as it contains a multi-element tensor with shape {v.shape}.'
+                        )
+                        continue
+                except Exception:
+                    logging.warning(
+                        f'WandB logging of key "{k}" was ignored as tensor conversion failed.'
+                    )
+                    continue
+
             if not isinstance(v, (int | float | str)):
                 logging.warning(
                     f'WandB logging of key "{k}" was ignored as its type "{type(v)}" is not handled by this wrapper.'
