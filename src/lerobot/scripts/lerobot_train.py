@@ -158,18 +158,6 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # When using accelerate, only the main process should log to avoid duplicate outputs
     is_main_process = accelerator.is_main_process
 
-    # Only log on main process
-    if is_main_process:
-        logging.info(pformat(cfg.to_dict()))
-
-    # Initialize wandb only on main process
-    if cfg.wandb.enable and cfg.wandb.project and is_main_process:
-        wandb_logger = WandBLogger(cfg)
-    else:
-        wandb_logger = None
-        if is_main_process:
-            logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
-
     if cfg.seed is not None:
         set_seed(cfg.seed, accelerator=accelerator)
 
@@ -189,15 +177,9 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     if not is_main_process:
         dataset = make_dataset(cfg)
 
-    # Create environment used for evaluating checkpoints during training on simulation data.
-    # On real-world data, no need to create an environment as evaluations are done outside train.py,
-    # using the eval.py instead, with gym_dora environment and dora-rs.
-    eval_env = None
-    if cfg.eval_freq > 0 and cfg.env is not None:
-        if is_main_process:
-            logging.info("Creating env")
-        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
-
+    # Create policy BEFORE wandb initialization
+    # This ensures make_policy() updates cfg.policy features from the dataset,
+    # and wandb logs the correct action/state dimensions
     if is_main_process:
         logging.info("Creating policy")
     policy = make_policy(
@@ -208,6 +190,28 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     # Wait for all processes to finish policy creation before continuing
     accelerator.wait_for_everyone()
+
+    # Only log on main process
+    if is_main_process:
+        logging.info(pformat(cfg.to_dict()))
+
+    # Initialize wandb only on main process
+    # At this point cfg.policy has been updated with correct dataset features by make_policy()
+    if cfg.wandb.enable and cfg.wandb.project and is_main_process:
+        wandb_logger = WandBLogger(cfg)
+    else:
+        wandb_logger = None
+        if is_main_process:
+            logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
+
+    # Create environment used for evaluating checkpoints during training on simulation data.
+    # On real-world data, no need to create an environment as evaluations are done outside train.py,
+    # using the eval.py instead, with gym_dora environment and dora-rs.
+    eval_env = None
+    if cfg.eval_freq > 0 and cfg.env is not None:
+        if is_main_process:
+            logging.info("Creating env")
+        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}

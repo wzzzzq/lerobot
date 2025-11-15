@@ -386,26 +386,29 @@ def make_policy(
 
     policy_cls = get_policy_class(cfg.type)
 
-    kwargs = {}
+    # Warn if instantiating from scratch with environment features
+    if env_cfg is not None and not cfg.pretrained_path:
+        logging.warning(
+            "You are instantiating a policy from scratch and its features are parsed from an environment "
+            "rather than a dataset. Normalization modules inside the policy will have infinite values "
+            "by default without stats from a dataset."
+        )
+
+    # Parse features from dataset or environment
     if ds_meta is not None:
         features = dataset_to_policy_features(ds_meta.features)
     else:
-        if not cfg.pretrained_path:
-            logging.warning(
-                "You are instantiating a policy from scratch and its features are parsed from an environment "
-                "rather than a dataset. Normalization modules inside the policy will have infinite values "
-                "by default without stats from a dataset."
-            )
         if env_cfg is None:
             raise ValueError("env_cfg cannot be None when ds_meta is not provided")
         features = env_to_policy_features(env_cfg)
 
-    # Unconditionally override features with dataset/environment features
-    # This ensures that feature names (e.g., camera names) always match the current dataset,
-    # even when loading from a pretrained model that was trained on different feature names
+    # Unconditionally override config features with dataset/environment features
+    # This ensures that feature dimensions always match the current dataset,
+    # even when loading from a pretrained model with different dimensions
     cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
-    kwargs["config"] = cfg
+
+    kwargs = {"config": cfg}
 
     if cfg.pretrained_path:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
