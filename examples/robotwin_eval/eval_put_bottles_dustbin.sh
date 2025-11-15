@@ -13,7 +13,7 @@
 # ==========================
 
 # Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_vlm/checkpoints"
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
 
 # Task settings
