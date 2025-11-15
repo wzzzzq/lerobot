@@ -137,6 +137,30 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
 
     print(f"Loading from checkpoint: {policy_path}")
     policy = SmolVLAPolicy.from_pretrained(policy_path)
+
+    # HOTFIX: Override action feature shape to match current environment
+    # This fixes the issue when checkpoint was trained with old code that didn't
+    # unconditionally override output_features from pretrained model
+    from lerobot.configs.types import PolicyFeature, FeatureType
+    left_arm_dim = usr_args.get("left_arm_dim", 7)  # 6 joints + 1 gripper
+    right_arm_dim = usr_args.get("right_arm_dim", 7)  # 6 joints + 1 gripper
+    total_action_dim = left_arm_dim + right_arm_dim
+
+    original_action_dim = policy.config.action_feature.shape[0] if policy.config.action_feature else 0
+    if original_action_dim != total_action_dim:
+        print(f"⚠ WARNING: Action dimension mismatch detected!")
+        print(f"  Checkpoint config has: {original_action_dim} dims")
+        print(f"  Current environment needs: {total_action_dim} dims")
+        print(f"  Overriding action feature to match environment...")
+        print(f"  (Left arm: {left_arm_dim}, Right arm: {right_arm_dim})")
+
+        # Override the action feature with correct dimension
+        policy.config.output_features['action'] = PolicyFeature(
+            type=FeatureType.ACTION,
+            shape=(total_action_dim,)
+        )
+        print(f"✓ Action dimension updated to: {total_action_dim}")
+
     policy.to(device)
     policy.eval()
 
