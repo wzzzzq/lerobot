@@ -35,7 +35,8 @@ CUDA_VISIBLE_DEVICES=3 python src/lerobot/scripts/lerobot_train.py \
   --policy.push_to_hub=false
 
 # Notes:
-# - Added --policy.teacher_path pointing to pretrained checkpoint
+# - When use_reflow=true, student model automatically inherits teacher weights
+# - VLM is frozen, only action expert layers are fine-tuned
+# - No need to specify --policy.pretrained_path (handled automatically)
 # - Changed output_dir to 2rf_put_bottles_dustbin to distinguish from pretrain
 # - Changed run_id prefix to 2rf_put_bottles_dustbin for W&B tracking
-# - Using same dataset and wandb configuration as provided
