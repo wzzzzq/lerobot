@@ -108,9 +108,7 @@ def standardise_state_dict(
         for canon, variants in collisions.items():
             print(f"[standardise_state_dict] '{canon}'  ←  {variants}")
         if unmatched:
-            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys:")
-            for key in unmatched:
-                print(f"  - {key}")
+            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys (normalization stats, intentionally skipped)")
 
     out.update({k: checkpoint[k] for k in unmatched})
     return out, unmatched
