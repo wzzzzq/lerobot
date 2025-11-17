@@ -823,9 +823,10 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def load_teacher_model(self):
-        """Load teacher model for Reflow training (lazy loading).
+        """Load teacher model for Reflow training (lazy loading with VLM sharing).
 
-        The teacher model is kept on the same device as the student model.
+        The teacher model shares the same VLM with the student model to save GPU memory.
+        Only the expert layers are separate between teacher and student.
         """
         if not hasattr(self, "_teacher_model") or self._teacher_model is None:
             if self.config.teacher_model_path is None:
@@ -841,6 +842,21 @@ class VLAFlowMatching(nn.Module):
             device = next(self.parameters()).device
             dtype = next(self.parameters()).dtype
             self._teacher_model = self._teacher_model.to(device=device, dtype=dtype)
+
+            # Share VLM between teacher and student to save GPU memory
+            # Since VLM is frozen and identical in both models, we can safely share it
+            print("[Reflow] Sharing VLM between teacher and student to save GPU memory")
+            teacher_vlm = self._teacher_model.model.vlm_with_expert.vlm
+            student_vlm = self.model.vlm_with_expert.vlm
+
+            # Calculate memory saved
+            vlm_params = sum(p.numel() * p.element_size() for p in teacher_vlm.parameters())
+            memory_saved_gb = vlm_params / (1024**3)
+
+            # Replace teacher's VLM with student's VLM (shared reference)
+            self._teacher_model.model.vlm_with_expert.vlm = student_vlm
+
+            print(f"[Reflow] VLM sharing enabled - saved ~{memory_saved_gb:.2f} GB GPU memory")
 
             # Freeze teacher model
             for param in self._teacher_model.parameters():

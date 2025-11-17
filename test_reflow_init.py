@@ -50,17 +50,27 @@ def test_reflow_initialization():
     reasonable_ratio = 10 <= trainable_ratio <= 40
     print(f"  Ratio check: {'✓ REASONABLE (10-40%)' if reasonable_ratio else '✗ UNEXPECTED'}")
 
-    # Check teacher model device
-    print(f"\n3. Checking teacher model device...")
+    # Check teacher model device and VLM sharing
+    print(f"\n3. Checking teacher model device and VLM sharing...")
     teacher = policy.model.load_teacher_model()
     teacher_device = next(teacher.parameters()).device
     student_device = next(policy.parameters()).device
     same_device = teacher_device == student_device
 
+    # Check if VLM is shared (same object reference)
+    teacher_vlm = teacher.model.vlm_with_expert.vlm
+    student_vlm = policy.model.vlm_with_expert.vlm
+    vlm_shared = teacher_vlm is student_vlm
+
     print(f"\nTeacher Model Device:")
     print(f"  Teacher device: {teacher_device}")
     print(f"  Student device: {student_device}")
     print(f"  Status: {'✓ SAME DEVICE' if same_device else '✗ DIFFERENT DEVICE'}")
+
+    print(f"\nVLM Sharing:")
+    print(f"  Teacher VLM ID: {id(teacher_vlm)}")
+    print(f"  Student VLM ID: {id(student_vlm)}")
+    print(f"  Status: {'✓ SHARED (same object)' if vlm_shared else '✗ SEPARATE (different objects)'}")
 
     # Verify expectations
     success = True
@@ -75,6 +85,10 @@ def test_reflow_initialization():
 
     if not same_device:
         print("\n✗ FAIL: Teacher and student should be on the same device")
+        success = False
+
+    if not vlm_shared:
+        print("\n✗ FAIL: Teacher and student should share the same VLM to save memory")
         success = False
 
     if success:
