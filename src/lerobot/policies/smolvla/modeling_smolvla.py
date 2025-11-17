@@ -330,12 +330,18 @@ class SmolVLAPolicy(PreTrainedPolicy):
         config.validate_features()
         self.config = config
 
+        # Reflow: Ensure train_expert_only=True to freeze VLM
+        if config.use_reflow:
+            if not config.train_expert_only:
+                print("[Reflow] Setting train_expert_only=True to freeze VLM for reflow training")
+                config.train_expert_only = True
+
         self.model = VLAFlowMatching(config)
 
         # Reflow: Automatically initialize student from teacher weights
         if config.use_reflow and config.teacher_model_path:
             self._init_student_from_teacher()
-            self._freeze_vlm_for_reflow()
+            self._log_trainable_params()
 
         self.reset()
 
@@ -369,51 +375,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def _freeze_vlm_for_reflow(self):
-        """Freeze VLM components and only train action expert for Reflow fine-tuning.
-
-        This method freezes:
-        - Vision encoder (if not already frozen)
-        - VLM transformer layers
-        - Language embedding layers
-
-        Only the following components remain trainable:
-        - Action expert layers (lm_expert.layers) in vlm_with_expert
-        - action_in_proj
-        - action_out_proj
-        - action_time_mlp_in
-        - action_time_mlp_out
-        - state_proj (if train_state_proj=True)
-        """
-        print("[Reflow] Freezing VLM components, only training action expert")
-
-        # Freeze the entire vlm_with_expert model first
-        for param in self.model.vlm_with_expert.parameters():
-            param.requires_grad = False
-
-        # Unfreeze only the expert layers (lm_expert.layers)
-        if hasattr(self.model.vlm_with_expert, 'lm_expert'):
-            if hasattr(self.model.vlm_with_expert.lm_expert, 'layers'):
-                for layer in self.model.vlm_with_expert.lm_expert.layers:
-                    for param in layer.parameters():
-                        param.requires_grad = True
-                print(f"[Reflow] Unfroze {len(self.model.vlm_with_expert.lm_expert.layers)} expert layers")
-
-        # Unfreeze action-related projections (these are always trainable in reflow)
-        for param in self.model.action_in_proj.parameters():
-            param.requires_grad = True
-        for param in self.model.action_out_proj.parameters():
-            param.requires_grad = True
-        for param in self.model.action_time_mlp_in.parameters():
-            param.requires_grad = True
-        for param in self.model.action_time_mlp_out.parameters():
-            param.requires_grad = True
-
-        # State projection follows the config setting
-        for param in self.model.state_proj.parameters():
-            param.requires_grad = self.config.train_state_proj
-
-        # Print trainable parameter statistics
+    def _log_trainable_params(self):
+        """Log trainable parameter statistics for Reflow training."""
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         print(f"[Reflow] Total parameters: {total_params:,}")
