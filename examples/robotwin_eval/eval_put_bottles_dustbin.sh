@@ -13,7 +13,7 @@
 # ==========================
 
 # Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_vlm/checkpoints"
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
 
 # Task settings
@@ -21,7 +21,7 @@ TASK_NAME="put_bottles_dustbin"
 TASK_CONFIG="demo_clean"  # Options: "demo_clean", "randomized", etc.
 
 # Evaluation settings
-NUM_EPISODES=10  # Number of episodes to evaluate
+NUM_EPISODES=100  # Number of episodes to evaluate
 SEED=42
 INSTRUCTION_TYPE="seen"  # Options: "seen", "unseen"
 
