@@ -860,21 +860,25 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def load_teacher_model(self):
-        """Load teacher model for Reflow training (lazy loading)."""
+        """Load teacher model for Reflow training (lazy loading with CPU offloading).
+
+        The teacher model is kept on CPU to save GPU memory. It will be temporarily
+        moved to GPU only when needed for generating X_1 in generate_reflow_target().
+        """
         if not hasattr(self, "_teacher_model") or self._teacher_model is None:
             if self.config.teacher_model_path is None:
                 raise ValueError("teacher_model_path must be set when use_reflow=True")
 
             from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
-            print(f"Loading teacher model from {self.config.teacher_model_path}")
+            print(f"[Reflow] Loading teacher model from {self.config.teacher_model_path}")
             self._teacher_model = SmolVLAPolicy.from_pretrained(self.config.teacher_model_path)
             self._teacher_model.eval()
 
-            # Move to same device and dtype as student model
-            device = next(self.parameters()).device
-            dtype = next(self.parameters()).dtype
-            self._teacher_model = self._teacher_model.to(device=device, dtype=dtype)
+            # Keep teacher on CPU to save GPU memory (CPU offloading)
+            # Use float32 for CPU to maintain precision
+            print("[Reflow] Keeping teacher model on CPU (offloading to save GPU memory)")
+            self._teacher_model = self._teacher_model.to(device='cpu', dtype=torch.float32)
 
             # Freeze teacher model
             for param in self._teacher_model.parameters():
@@ -892,6 +896,9 @@ class VLAFlowMatching(nn.Module):
 
         The ODE solver uses the same num_steps as the teacher model.
 
+        The teacher model is temporarily moved from CPU to GPU for this operation
+        to save GPU memory during training.
+
         Args:
             images, img_masks, lang_tokens, lang_masks, state: Input observations
             noise: X_0, sampled from N(0, 1)
@@ -903,50 +910,64 @@ class VLAFlowMatching(nn.Module):
 
         bsize = noise.shape[0]
         device = noise.device
+        student_dtype = next(self.parameters()).dtype
 
-        # Get prefix embeddings and cache (shared across denoising steps)
-        prefix_embs, prefix_pad_masks, prefix_att_masks = teacher.model.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
+        # Temporarily move teacher to GPU for ODE generation
+        teacher = teacher.to(device=device, dtype=student_dtype)
 
-        # Create position_ids and attention_mask from prefix masks
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-
-        _, past_key_values = teacher.model.vlm_with_expert.forward(
-            attention_mask=prefix_att_2d_masks,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=True,
-            fill_kv_cache=True,
-        )
-
-        # Use teacher model's num_steps (same as it was trained with)
-        num_steps = teacher.model.config.num_steps
-        dt = -1.0 / num_steps  # negative because going from t=1 to t=0
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
-
-        x_t = noise.clone()  # Start from noise (t=1)
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-
-        # Euler ODE solver: x_t += dt * v_t
-        while time >= -dt / 2:  # Iterate until t=0
-            expanded_time = time.expand(bsize)
-
-            # Predict velocity at current timestep using teacher model
-            v_t = teacher.model.denoise_step(
-                prefix_pad_masks,
-                past_key_values,
-                x_t,
-                expanded_time,
+        try:
+            # Get prefix embeddings and cache (shared across denoising steps)
+            prefix_embs, prefix_pad_masks, prefix_att_masks = teacher.model.embed_prefix(
+                images, img_masks, lang_tokens, lang_masks, state=state
             )
 
-            # Euler step: x_{t+dt} = x_t + dt * v_t
-            x_t = x_t + dt * v_t
-            time = time + dt
+            # Create position_ids and attention_mask from prefix masks
+            prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+            prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
-        return x_t  # This is X_1
+            _, past_key_values = teacher.model.vlm_with_expert.forward(
+                attention_mask=prefix_att_2d_masks,
+                position_ids=prefix_position_ids,
+                past_key_values=None,
+                inputs_embeds=[prefix_embs, None],
+                use_cache=True,
+                fill_kv_cache=True,
+            )
+
+            # Use teacher model's num_steps (same as it was trained with)
+            num_steps = teacher.model.config.num_steps
+            dt = -1.0 / num_steps  # negative because going from t=1 to t=0
+            dt = torch.tensor(dt, dtype=torch.float32, device=device)
+
+            x_t = noise.clone()  # Start from noise (t=1)
+            time = torch.tensor(1.0, dtype=torch.float32, device=device)
+
+            # Euler ODE solver: x_t += dt * v_t
+            while time >= -dt / 2:  # Iterate until t=0
+                expanded_time = time.expand(bsize)
+
+                # Predict velocity at current timestep using teacher model
+                v_t = teacher.model.denoise_step(
+                    prefix_pad_masks,
+                    past_key_values,
+                    x_t,
+                    expanded_time,
+                )
+
+                # Euler step: x_{t+dt} = x_t + dt * v_t
+                x_t = x_t + dt * v_t
+                time = time + dt
+
+            result = x_t  # This is X_1
+
+        finally:
+            # Move teacher back to CPU to free GPU memory
+            teacher = teacher.to(device='cpu', dtype=torch.float32)
+            # Clear GPU cache
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        return result
 
     def forward_reflow(
         self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None

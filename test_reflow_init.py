@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test script to verify Reflow student initialization and VLM freezing."""
+"""Test script to verify Reflow student initialization, VLM freezing, and CPU offloading."""
 
 import torch
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
@@ -10,7 +10,7 @@ def test_reflow_initialization():
     """Test that student model correctly inherits teacher weights and freezes VLM."""
 
     print("="*80)
-    print("Testing Reflow Initialization and VLM Freezing")
+    print("Testing Reflow Initialization, VLM Freezing, and CPU Offloading")
     print("="*80)
 
     # Create a config with reflow enabled
@@ -83,6 +83,16 @@ def test_reflow_initialization():
     print(f"  Trainable parameters: {trainable_params:,}")
     print(f"  Trainable ratio: {100*trainable_params/total_params:.2f}%")
 
+    # Check teacher model CPU offloading
+    print(f"\n3. Checking teacher model CPU offloading...")
+    teacher = policy.model.load_teacher_model()
+    teacher_device = next(teacher.parameters()).device
+    teacher_on_cpu = teacher_device.type == 'cpu'
+
+    print(f"\nTeacher Model Device:")
+    print(f"  Device: {teacher_device}")
+    print(f"  Status: {'✓ ON CPU (offloaded)' if teacher_on_cpu else '✗ ON GPU (not offloaded)'}")
+
     # Verify expectations
     success = True
 
@@ -96,6 +106,10 @@ def test_reflow_initialization():
 
     if action_proj_trainable == 0:
         print("\n✗ FAIL: Action projections should be trainable but are frozen")
+        success = False
+
+    if not teacher_on_cpu:
+        print("\n✗ FAIL: Teacher should be on CPU but is on GPU")
         success = False
 
     if success:
