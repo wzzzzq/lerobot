@@ -154,7 +154,13 @@ def load_smolvla(
 
     # HACK(aliberts): to not overwrite normalization parameters as they should come from the dataset
     norm_keys = ("normalize_inputs", "normalize_targets", "unnormalize_outputs")
-    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(norm_keys)}
+
+    # Filter out normalization params and teacher model weights (teacher saved during reflow training)
+    teacher_keys_prefix = "model._teacher_model."
+    state_dict = {
+        k: v for k, v in state_dict.items()
+        if not k.startswith(norm_keys) and not k.startswith(teacher_keys_prefix)
+    }
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
 
