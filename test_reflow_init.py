@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test script to verify Reflow student initialization, VLM freezing, and CPU offloading."""
+"""Test script to verify Reflow student initialization and VLM freezing."""
 
 import torch
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
@@ -10,7 +10,7 @@ def test_reflow_initialization():
     """Test that student model correctly inherits teacher weights and freezes VLM."""
 
     print("="*80)
-    print("Testing Reflow Initialization, VLM Freezing, and CPU Offloading")
+    print("Testing Reflow Initialization and VLM Freezing")
     print("="*80)
 
     # Create a config with reflow enabled
@@ -50,15 +50,17 @@ def test_reflow_initialization():
     reasonable_ratio = 10 <= trainable_ratio <= 40
     print(f"  Ratio check: {'✓ REASONABLE (10-40%)' if reasonable_ratio else '✗ UNEXPECTED'}")
 
-    # Check teacher model CPU offloading
-    print(f"\n3. Checking teacher model CPU offloading...")
+    # Check teacher model device
+    print(f"\n3. Checking teacher model device...")
     teacher = policy.model.load_teacher_model()
     teacher_device = next(teacher.parameters()).device
-    teacher_on_cpu = teacher_device.type == 'cpu'
+    student_device = next(policy.parameters()).device
+    same_device = teacher_device == student_device
 
     print(f"\nTeacher Model Device:")
-    print(f"  Device: {teacher_device}")
-    print(f"  Status: {'✓ ON CPU (offloaded)' if teacher_on_cpu else '✗ ON GPU (not offloaded)'}")
+    print(f"  Teacher device: {teacher_device}")
+    print(f"  Student device: {student_device}")
+    print(f"  Status: {'✓ SAME DEVICE' if same_device else '✗ DIFFERENT DEVICE'}")
 
     # Verify expectations
     success = True
@@ -71,8 +73,8 @@ def test_reflow_initialization():
         print(f"\n✗ FAIL: Trainable ratio {trainable_ratio:.2f}% is outside expected range (10-40%)")
         success = False
 
-    if not teacher_on_cpu:
-        print("\n✗ FAIL: Teacher should be on CPU but is on GPU")
+    if not same_device:
+        print("\n✗ FAIL: Teacher and student should be on the same device")
         success = False
 
     if success:
