@@ -138,24 +138,47 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
 
     print(f"Loading from checkpoint: {policy_path}")
 
-    # Load config first and disable reflow (reflow is only for training, not eval)
-    from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
-    config = SmolVLAConfig.from_pretrained(policy_path)
+    # Temporarily modify config.json to disable reflow during loading
+    # (reflow is only for training, not evaluation)
+    import json
+    import shutil
+    config_path = os.path.join(policy_path, "config.json")
+    config_backup_path = os.path.join(policy_path, "config.json.eval_backup")
 
-    # Disable reflow to avoid loading teacher model during eval
-    if hasattr(config, 'use_reflow') and config.use_reflow:
-        print(f"Disabling reflow for evaluation (use_reflow: {config.use_reflow} -> False)")
-        config.use_reflow = False
-        config.teacher_model_path = None
+    # Read and modify config
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
 
-    # Override num_steps if specified (e.g., for 2-RF evaluation with fewer steps)
+    # Backup original config
+    shutil.copy(config_path, config_backup_path)
+
+    # Disable reflow
+    modified = False
+    if config_dict.get('use_reflow', False):
+        print(f"Temporarily disabling reflow for evaluation (use_reflow: True -> False)")
+        config_dict['use_reflow'] = False
+        config_dict['teacher_model_path'] = None
+        modified = True
+
+    # Override num_steps if specified
     if "num_steps" in usr_args:
         num_steps = usr_args["num_steps"]
-        print(f"Overriding num_steps: {config.num_steps} -> {num_steps}")
-        config.num_steps = num_steps
+        print(f"Overriding num_steps: {config_dict.get('num_steps', 10)} -> {num_steps}")
+        config_dict['num_steps'] = num_steps
+        modified = True
 
-    # Load policy with modified config
-    policy = SmolVLAPolicy.from_pretrained(policy_path, config=config)
+    # Write modified config
+    if modified:
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+
+    try:
+        # Load policy with modified config
+        policy = SmolVLAPolicy.from_pretrained(policy_path)
+    finally:
+        # Restore original config
+        if os.path.exists(config_backup_path):
+            shutil.move(config_backup_path, config_path)
 
     policy.to(device)
     policy.eval()
