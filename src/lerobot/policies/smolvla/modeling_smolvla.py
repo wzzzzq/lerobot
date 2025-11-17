@@ -330,7 +330,19 @@ class SmolVLAPolicy(PreTrainedPolicy):
         config.validate_features()
         self.config = config
 
+        # Reflow: Ensure train_expert_only=True to freeze VLM
+        if config.use_reflow:
+            if not config.train_expert_only:
+                print("[Reflow] Setting train_expert_only=True to freeze VLM for reflow training")
+                config.train_expert_only = True
+
         self.model = VLAFlowMatching(config)
+
+        # Reflow: Automatically initialize student from teacher weights
+        if config.use_reflow and config.teacher_model_path:
+            self._init_student_from_teacher()
+            self._log_trainable_params()
+
         self.reset()
 
     def reset(self):
@@ -338,6 +350,37 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self._queues = {
             ACTION: deque(maxlen=self.config.n_action_steps),
         }
+
+    def _init_student_from_teacher(self):
+        """Initialize student model weights from teacher model for Reflow training.
+
+        This method loads the teacher model weights into the student model, ensuring
+        that the student starts from the same pretrained checkpoint as the teacher.
+        This is consistent with the official RectifiedFlow implementation.
+        """
+        print(f"[Reflow] Initializing student model from teacher: {self.config.teacher_model_path}")
+
+        # Load teacher model weights using the class's from_pretrained method
+        teacher_policy = self.__class__.from_pretrained(self.config.teacher_model_path)
+
+        # Copy weights from teacher to student
+        self.load_state_dict(teacher_policy.state_dict(), strict=False)
+
+        print("[Reflow] Student model initialized with teacher weights")
+
+        # Clean up teacher model to save memory
+        del teacher_policy
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _log_trainable_params(self):
+        """Log trainable parameter statistics for Reflow training."""
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"[Reflow] Total parameters: {total_params:,}")
+        print(f"[Reflow] Trainable parameters: {trainable_params:,} ({100*trainable_params/total_params:.2f}%)")
 
     def get_optim_params(self) -> dict:
         return self.parameters()
@@ -780,18 +823,21 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def load_teacher_model(self):
-        """Load teacher model for Reflow training (lazy loading)."""
+        """Load teacher model for Reflow training (lazy loading).
+
+        The teacher model is kept on the same device as the student model.
+        """
         if not hasattr(self, "_teacher_model") or self._teacher_model is None:
             if self.config.teacher_model_path is None:
                 raise ValueError("teacher_model_path must be set when use_reflow=True")
 
             from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
-            print(f"Loading teacher model from {self.config.teacher_model_path}")
+            print(f"[Reflow] Loading teacher model from {self.config.teacher_model_path}")
             self._teacher_model = SmolVLAPolicy.from_pretrained(self.config.teacher_model_path)
             self._teacher_model.eval()
 
-            # Move to same device and dtype as student model
+            # Keep teacher on same device and dtype as student model
             device = next(self.parameters()).device
             dtype = next(self.parameters()).dtype
             self._teacher_model = self._teacher_model.to(device=device, dtype=dtype)

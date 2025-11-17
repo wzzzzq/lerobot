@@ -24,7 +24,7 @@ CUDA_VISIBLE_DEVICES=3 python src/lerobot/scripts/lerobot_train.py \
   --dataset.repo_id=name/aloha_agix_sim \
   --policy.tokenizer_max_length=96 \
   --batch_size=32 \
-  --steps=50000 \
+  --steps=10000 \
   --policy.device=cuda \
   --output_dir=/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin \
   --wandb.enable=true \
@@ -35,7 +35,9 @@ CUDA_VISIBLE_DEVICES=3 python src/lerobot/scripts/lerobot_train.py \
   --policy.push_to_hub=false
 
 # Notes:
-# - Added --policy.teacher_path pointing to pretrained checkpoint
+# - When use_reflow=true, student model automatically inherits teacher weights
+# - VLM is automatically frozen (train_expert_only=True), only action expert is fine-tuned
+# - No need to specify --policy.pretrained_path (handled automatically)
+# - Reflow typically needs 10-30% of initial training steps (teacher: 20k → student: 10k)
 # - Changed output_dir to 2rf_put_bottles_dustbin to distinguish from pretrain
 # - Changed run_id prefix to 2rf_put_bottles_dustbin for W&B tracking
-# - Using same dataset and wandb configuration as provided
