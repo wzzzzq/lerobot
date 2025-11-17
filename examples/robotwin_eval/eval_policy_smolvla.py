@@ -137,14 +137,25 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
         raise FileNotFoundError(f"Policy checkpoint not found: {policy_path}")
 
     print(f"Loading from checkpoint: {policy_path}")
-    policy = SmolVLAPolicy.from_pretrained(policy_path)
+
+    # Load config first and disable reflow (reflow is only for training, not eval)
+    from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+    config = SmolVLAConfig.from_pretrained(policy_path)
+
+    # Disable reflow to avoid loading teacher model during eval
+    if hasattr(config, 'use_reflow') and config.use_reflow:
+        print(f"Disabling reflow for evaluation (use_reflow: {config.use_reflow} -> False)")
+        config.use_reflow = False
+        config.teacher_model_path = None
 
     # Override num_steps if specified (e.g., for 2-RF evaluation with fewer steps)
     if "num_steps" in usr_args:
         num_steps = usr_args["num_steps"]
-        print(f"Overriding num_steps: {policy.config.num_steps} -> {num_steps}")
-        policy.config.num_steps = num_steps
-        policy.model.config.num_steps = num_steps
+        print(f"Overriding num_steps: {config.num_steps} -> {num_steps}")
+        config.num_steps = num_steps
+
+    # Load policy with modified config
+    policy = SmolVLAPolicy.from_pretrained(policy_path, config=config)
 
     policy.to(device)
     policy.eval()
