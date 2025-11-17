@@ -13,7 +13,7 @@
 # ==========================
 
 # Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin"
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin/checkpoints"
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
 
 # Denoising steps for 2-RF model
