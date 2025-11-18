@@ -150,6 +150,10 @@ def load_smolvla(
     if checkpoint_keys_mapping and "//" in checkpoint_keys_mapping:
         state_dict = rename_checkpoint_keys(state_dict, checkpoint_keys_mapping)
 
+    # Filter out teacher model weights early (saved during reflow training, not needed for loading)
+    teacher_keys_prefix = "model._teacher_model."
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(teacher_keys_prefix)}
+
     state_dict, _ = standardise_state_dict(state_dict, set(model.state_dict().keys()))
 
     # HACK(aliberts): to not overwrite normalization parameters as they should come from the dataset
