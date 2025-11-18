@@ -3,7 +3,7 @@
 # Evaluation script for Put Bottles Dustbin task with SmolVLA
 #
 # This script evaluates a trained SmolVLA policy on the RoboTwin put_bottles_dustbin task.
-# It creates a temporary config file with all settings and runs the evaluation.
+# Works for both standard (1-RF) and reflow (2-RF) trained models.
 #
 # Usage:
 #   bash examples/robotwin_eval/eval_put_bottles_dustbin.sh
@@ -12,9 +12,16 @@
 # Configuration
 # ==========================
 
-# Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"
+# Policy settings - Change these to evaluate different checkpoints
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"  # 1-RF checkpoint
+# POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin"  # 2-RF checkpoint (uncomment to use)
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
+
+# Denoising steps (optional - leave empty to use checkpoint's default)
+# For 1-RF: typically 10 steps
+# For 2-RF: typically 2-5 steps (faster inference)
+NUM_STEPS=""  # Empty = use checkpoint default
+# NUM_STEPS=2  # Uncomment and set for 2-RF models
 
 # Task settings
 TASK_NAME="put_bottles_dustbin"
@@ -49,6 +56,11 @@ echo -e "\033[33m  SmolVLA Evaluation - Put Bottles Dustbin\033[0m"
 echo -e "\033[33m========================================\033[0m"
 echo -e "\033[33mPolicy Path: ${POLICY_PATH}\033[0m"
 echo -e "\033[33mCheckpoint: ${CKPT_SETTING}\033[0m"
+if [ -n "${NUM_STEPS}" ]; then
+    echo -e "\033[33mDenoising Steps: ${NUM_STEPS} (override)\033[0m"
+else
+    echo -e "\033[33mDenoising Steps: Using checkpoint default\033[0m"
+fi
 echo -e "\033[33mTask Config: ${TASK_CONFIG}\033[0m"
 echo -e "\033[33mGPU: ${CUDA_VISIBLE_DEVICES}\033[0m"
 echo -e "\033[33mSeed: ${SEED}\033[0m"
@@ -92,6 +104,11 @@ n_action_steps: ${N_ACTION_STEPS}
 policy_name: SmolVLA
 tokenizer_max_length: ${TOKENIZER_MAX_LENGTH}
 EOF
+
+# Add num_steps if specified
+if [ -n "${NUM_STEPS}" ]; then
+    echo "num_steps: ${NUM_STEPS}" >> ${CONFIG_FILE}
+fi
 
 echo "Config file created: ${CONFIG_FILE}"
 echo ""
