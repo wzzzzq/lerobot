@@ -138,47 +138,22 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
 
     print(f"Loading from checkpoint: {policy_path}")
 
-    # Temporarily modify config.json to disable reflow during loading
-    # (reflow is only for training, not evaluation)
-    import json
-    import shutil
-    config_path = os.path.join(policy_path, "config.json")
-    config_backup_path = os.path.join(policy_path, "config.json.eval_backup")
-
-    # Read and modify config
-    with open(config_path, 'r') as f:
-        config_dict = json.load(f)
-
-    # Backup original config
-    shutil.copy(config_path, config_backup_path)
-
-    # Disable reflow
-    modified = False
-    if config_dict.get('use_reflow', False):
-        print(f"Temporarily disabling reflow for evaluation (use_reflow: True -> False)")
-        config_dict['use_reflow'] = False
-        config_dict['teacher_model_path'] = None
-        modified = True
-
-    # Override num_steps if specified
+    # Override num_steps in config.json if specified (permanent change)
     if "num_steps" in usr_args:
-        num_steps = usr_args["num_steps"]
-        print(f"Overriding num_steps: {config_dict.get('num_steps', 10)} -> {num_steps}")
-        config_dict['num_steps'] = num_steps
-        modified = True
+        import json
+        config_path = os.path.join(policy_path, "config.json")
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
 
-    # Write modified config
-    if modified:
+        num_steps = usr_args["num_steps"]
+        print(f"Overriding num_steps in config.json: {config_dict.get('num_steps', 10)} -> {num_steps}")
+        config_dict['num_steps'] = num_steps
+
         with open(config_path, 'w') as f:
             json.dump(config_dict, f, indent=2)
 
-    try:
-        # Load policy with modified config
-        policy = SmolVLAPolicy.from_pretrained(policy_path)
-    finally:
-        # Restore original config
-        if os.path.exists(config_backup_path):
-            shutil.move(config_backup_path, config_path)
+    # Load policy (new checkpoints don't have reflow artifacts)
+    policy = SmolVLAPolicy.from_pretrained(policy_path)
 
     policy.to(device)
     policy.eval()
