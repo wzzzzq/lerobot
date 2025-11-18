@@ -56,6 +56,7 @@ import math
 import os
 import re
 from collections import deque
+from pathlib import Path
 
 import safetensors
 import torch
@@ -145,6 +146,10 @@ def load_smolvla(
     checkpoint_keys_mapping: str = "",
 ) -> torch.nn.Module:
     state_dict = safetensors.torch.load_file(filename, device=device)
+
+    # Filter out teacher model weights early (saved during reflow training, not needed for loading)
+    teacher_keys_prefix = "model._teacher_model."
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(teacher_keys_prefix)}
 
     # Optional user-supplied renames (e.g. "model._orig_mod.//model.")
     if checkpoint_keys_mapping and "//" in checkpoint_keys_mapping:
@@ -384,6 +389,35 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
     def get_optim_params(self) -> dict:
         return self.parameters()
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        """Override save_pretrained to exclude reflow training artifacts.
+
+        This ensures that saved checkpoints:
+        1. Don't include use_reflow=True or teacher_model_path in config
+        2. Don't include teacher model weights in state_dict
+
+        These are only needed during reflow training, not for inference.
+        """
+        from lerobot.configs.constants import SAFETENSORS_SINGLE_FILE
+
+        # Save config without reflow artifacts
+        config_to_save = self.config.__class__(**{
+            k: v for k, v in vars(self.config).items()
+            if k not in ('use_reflow', 'teacher_model_path')
+        })
+        config_to_save._save_pretrained(save_directory)
+
+        # Save model weights without teacher model
+        state_dict = self.state_dict()
+        teacher_keys_prefix = "model._teacher_model."
+        state_dict_filtered = {
+            k: v for k, v in state_dict.items()
+            if not k.startswith(teacher_keys_prefix)
+        }
+
+        model_path = save_directory / SAFETENSORS_SINGLE_FILE
+        safetensors.torch.save_file(state_dict_filtered, model_path)
 
     @classmethod
     def _load_as_safetensor(
