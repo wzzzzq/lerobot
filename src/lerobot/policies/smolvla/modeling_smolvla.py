@@ -401,7 +401,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         These are only needed during reflow training, not for inference.
         """
-        from lerobot.configs.constants import SAFETENSORS_SINGLE_FILE
+        from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 
         # Save config without reflow artifacts
         config_to_save = self.config.__class__(**{
