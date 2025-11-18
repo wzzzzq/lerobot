@@ -33,7 +33,7 @@ CUDA_VISIBLE_DEVICES=2 python src/lerobot/scripts/lerobot_train.py \
   --dataset.repo_id=name/aloha_agix_sim \
   --policy.tokenizer_max_length=96 \
   --batch_size=32 \
-  --steps=10000 \
+  --steps=20000 \
   --policy.device=cuda \
   --output_dir=/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin \
   --wandb.enable=true \
@@ -42,7 +42,7 @@ CUDA_VISIBLE_DEVICES=2 python src/lerobot/scripts/lerobot_train.py \
   --wandb.run_id=${RUN_ID} \
   --wandb.mode=online \
   --policy.push_to_hub=false \
-  --save_freq=5000
+  --save_freq=2000
 
 # Notes:
 # - When use_reflow=true, student model automatically inherits teacher weights
