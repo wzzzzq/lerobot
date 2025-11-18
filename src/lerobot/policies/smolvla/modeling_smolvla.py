@@ -389,6 +389,43 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.parameters()
 
+    def _save_pretrained(self, save_directory: Path) -> None:
+        """Override save_pretrained to exclude reflow training artifacts.
+
+        This ensures that saved checkpoints:
+        1. Don't include use_reflow=True or teacher_model_path in config
+        2. Don't include teacher model weights in state_dict
+
+        These are only needed during reflow training, not for inference.
+        """
+        from pathlib import Path
+        from safetensors.torch import save_model as save_model_as_safetensor
+        from lerobot.configs.constants import SAFETENSORS_SINGLE_FILE
+
+        # Save config without reflow artifacts
+        config_to_save = self.config.__class__(**{
+            k: v for k, v in vars(self.config).items()
+            if k not in ('use_reflow', 'teacher_model_path')
+        })
+        config_to_save._save_pretrained(save_directory)
+
+        # Save model weights without teacher model
+        model_to_save = self.module if hasattr(self, "module") else self
+        state_dict = model_to_save.state_dict()
+
+        # Filter out teacher model weights (saved during reflow training but not needed)
+        state_dict_filtered = {
+            k: v for k, v in state_dict.items()
+            if not k.startswith('model._teacher_model.')
+        }
+
+        # Save filtered state dict using safetensors
+        import safetensors.torch
+        safetensors.torch.save_file(
+            state_dict_filtered,
+            str(save_directory / SAFETENSORS_SINGLE_FILE)
+        )
+
     @classmethod
     def _load_as_safetensor(
         cls,
