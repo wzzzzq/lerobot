@@ -888,7 +888,7 @@ class VLAFlowMatching(nn.Module):
             # Since VLM is frozen and identical in both models, we can safely share it
             print("[Reflow] Sharing VLM between teacher and student to save GPU memory")
             teacher_vlm = self._teacher_model.model.vlm_with_expert.vlm
-            student_vlm = self.model.vlm_with_expert.vlm
+            student_vlm = self.vlm_with_expert.vlm
 
             # Calculate memory saved
             vlm_params = sum(p.numel() * p.element_size() for p in teacher_vlm.parameters())
