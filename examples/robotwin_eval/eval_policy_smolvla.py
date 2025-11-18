@@ -136,36 +136,17 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
     if not os.path.exists(policy_path):
         raise FileNotFoundError(f"Policy checkpoint not found: {policy_path}")
 
-    # Override num_steps in config.json if specified (permanent change)
-    if "num_steps" in usr_args:
-        import json
-        config_path = os.path.join(policy_path, "config.json")
-        with open(config_path, 'r') as f:
-            config_dict = json.load(f)
-        num_steps = usr_args["num_steps"]
-        print(f"Overriding num_steps in config.json: {config_dict.get('num_steps', 10)} -> {num_steps}")
-        config_dict['num_steps'] = num_steps
-        with open(config_path, 'w') as f:
-            json.dump(config_dict, f, indent=2)
-
     print(f"Loading from checkpoint: {policy_path}")
-
-    # Override num_steps in config.json if specified (permanent change)
-    if "num_steps" in usr_args:
-        import json
-        config_path = os.path.join(policy_path, "config.json")
-        with open(config_path, 'r') as f:
-            config_dict = json.load(f)
-
-        num_steps = usr_args["num_steps"]
-        print(f"Overriding num_steps in config.json: {config_dict.get('num_steps', 10)} -> {num_steps}")
-        config_dict['num_steps'] = num_steps
-
-        with open(config_path, 'w') as f:
-            json.dump(config_dict, f, indent=2)
 
     # Load policy (new checkpoints don't have reflow artifacts)
     policy = SmolVLAPolicy.from_pretrained(policy_path)
+
+    # Override num_steps in memory if specified (doesn't modify checkpoint file)
+    if "num_steps" in usr_args:
+        original_num_steps = policy.config.num_steps
+        policy.config.num_steps = usr_args["num_steps"]
+        policy.model.config.num_steps = usr_args["num_steps"]  # Also update model's config
+        print(f"✓ Overriding num_steps: {original_num_steps} -> {usr_args['num_steps']}")
 
     policy.to(device)
     policy.eval()
