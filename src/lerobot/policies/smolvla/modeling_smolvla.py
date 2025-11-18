@@ -56,6 +56,7 @@ import math
 import os
 import re
 from collections import deque
+from pathlib import Path
 
 import safetensors
 import torch
@@ -398,8 +399,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         These are only needed during reflow training, not for inference.
         """
-        from pathlib import Path
-        from safetensors.torch import save_model as save_model_as_safetensor
         from lerobot.configs.constants import SAFETENSORS_SINGLE_FILE
 
         # Save config without reflow artifacts
