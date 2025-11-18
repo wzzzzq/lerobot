@@ -31,6 +31,10 @@ INSTRUCTION_TYPE="seen"  # Options: "seen", "unseen"
 N_ACTION_STEPS=50
 TOKENIZER_MAX_LENGTH=48
 
+# Denoising steps (optional - leave empty to use checkpoint's default)
+NUM_STEPS=""  # Empty = use checkpoint default
+# NUM_STEPS=2  # Uncomment and set for 2-RF models
+
 # GPU settings
 GPU_ID=1
 export CUDA_VISIBLE_DEVICES=${GPU_ID}
@@ -92,6 +96,12 @@ n_action_steps: ${N_ACTION_STEPS}
 policy_name: SmolVLA
 tokenizer_max_length: ${TOKENIZER_MAX_LENGTH}
 EOF
+
+# Add num_steps if specified
+if [ -n "${NUM_STEPS}" ]; then
+    echo "num_steps: ${NUM_STEPS}" >> ${CONFIG_FILE}
+    echo -e "\033[33mDenoising steps: ${NUM_STEPS}\033[0m"
+fi
 
 echo "Config file created: ${CONFIG_FILE}"
 echo ""
