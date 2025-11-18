@@ -109,7 +109,9 @@ def standardise_state_dict(
         for canon, variants in collisions.items():
             print(f"[standardise_state_dict] '{canon}'  ←  {variants}")
         if unmatched:
-            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys (normalization stats, intentionally skipped)")
+            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys")
+            for key in unmatched:
+                print(f"  - {key}")
 
     out.update({k: checkpoint[k] for k in unmatched})
     return out, unmatched
@@ -154,6 +156,10 @@ def load_smolvla(
     # Optional user-supplied renames (e.g. "model._orig_mod.//model.")
     if checkpoint_keys_mapping and "//" in checkpoint_keys_mapping:
         state_dict = rename_checkpoint_keys(state_dict, checkpoint_keys_mapping)
+
+    # Filter out teacher model weights early (saved during reflow training, not needed for loading)
+    teacher_keys_prefix = "model._teacher_model."
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(teacher_keys_prefix)}
 
     state_dict, _ = standardise_state_dict(state_dict, set(model.state_dict().keys()))
 
@@ -409,15 +415,21 @@ class SmolVLAPolicy(PreTrainedPolicy):
         config_to_save._save_pretrained(save_directory)
 
         # Save model weights without teacher model
-        state_dict = self.state_dict()
-        teacher_keys_prefix = "model._teacher_model."
+        model_to_save = self.module if hasattr(self, "module") else self
+        state_dict = model_to_save.state_dict()
+
+        # Filter out teacher model weights (saved during reflow training but not needed)
         state_dict_filtered = {
             k: v for k, v in state_dict.items()
-            if not k.startswith(teacher_keys_prefix)
+            if not k.startswith('model._teacher_model.')
         }
 
-        model_path = save_directory / SAFETENSORS_SINGLE_FILE
-        safetensors.torch.save_file(state_dict_filtered, model_path)
+        # Save filtered state dict using safetensors
+        import safetensors.torch
+        safetensors.torch.save_file(
+            state_dict_filtered,
+            str(save_directory / SAFETENSORS_SINGLE_FILE)
+        )
 
     @classmethod
     def _load_as_safetensor(

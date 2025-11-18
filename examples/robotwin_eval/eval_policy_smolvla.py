@@ -120,6 +120,7 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
             - policy_path: Base path to policy checkpoints
             - ckpt_setting: Checkpoint to load ("last" or "best")
             - device: Device to run on ("cuda" or "cpu")
+            - num_steps: (optional) Override denoising steps for inference
 
     Returns:
         SmolVLAWrapper instance
@@ -148,12 +149,29 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
             json.dump(config_dict, f, indent=2)
 
     print(f"Loading from checkpoint: {policy_path}")
+
+    # Override num_steps in config.json if specified (permanent change)
+    if "num_steps" in usr_args:
+        import json
+        config_path = os.path.join(policy_path, "config.json")
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
+
+        num_steps = usr_args["num_steps"]
+        print(f"Overriding num_steps in config.json: {config_dict.get('num_steps', 10)} -> {num_steps}")
+        config_dict['num_steps'] = num_steps
+
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+
+    # Load policy (new checkpoints don't have reflow artifacts)
     policy = SmolVLAPolicy.from_pretrained(policy_path)
 
     policy.to(device)
     policy.eval()
 
     print(f"✓ Successfully loaded model from: {policy_path}")
+    print(f"✓ Using num_steps: {policy.config.num_steps}")
 
     # Create preprocessor and postprocessor from the pretrained checkpoint
     # This will load the saved normalization statistics

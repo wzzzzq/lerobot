@@ -7,6 +7,15 @@ export http_proxy=http://172.16.0.136:18000
 export https_proxy=http://172.16.0.136:18000
 export TMPDIR=/pfs/pfs-ilWc5D/ziqianwang/tmp
 
+export WANDB_DIR="/pfs/pfs-ilWc5D/ziqianwang/wandb"
+export WANDB_CACHE_DIR="/pfs/pfs-ilWc5D/ziqianwang/wandb_cache"
+export WANDB_DATA_DIR="/pfs/pfs-ilWc5D/ziqianwang/wandb_data"
+export HF_HOME="/pfs/pfs-ilWc5D/ziqianwang/huggingface"
+export TRANSFORMERS_CACHE="/pfs/pfs-ilWc5D/ziqianwang/huggingface/transformers"
+export HF_DATASETS_CACHE="/pfs/pfs-ilWc5D/ziqianwang/huggingface/datasets"
+export TORCH_HOME="/pfs/pfs-ilWc5D/ziqianwang/torch"
+export TRITON_CACHE_DIR="/pfs/pfs-ilWc5D/ziqianwang/triton_cache"
+
 export WANDB_API_KEY="489fe7b734df1e91930d434d63c36b600b2faed9"
 
 # RTX 4000 series GPU support
@@ -16,10 +25,10 @@ export NCCL_IB_DISABLE="1"
 # Generate unique run_id with timestamp
 RUN_ID="2rf_put_bottles_dustbin_$(date +%Y%m%d_%H%M%S)"
 
-CUDA_VISIBLE_DEVICES=3 python src/lerobot/scripts/lerobot_train.py \
+CUDA_VISIBLE_DEVICES=2 python src/lerobot/scripts/lerobot_train.py \
   --policy.type=smolvla \
   --policy.use_reflow=true \
-  --policy.teacher_model_path=/pfs/pfs-ilWc5D/ziqianwang/pretrain_put_bottles_dustbin/checkpoints/020000/pretrained_model \
+  --policy.teacher_model_path=/pfs/pfs-ilWc5D/ziqianwang/pretrain_put_bottles_dustbin/checkpoints/last/pretrained_model \
   --dataset.root=/pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/name/aloha_agilex_sim/put_bottles_dustbin_v30 \
   --dataset.repo_id=name/aloha_agix_sim \
   --policy.tokenizer_max_length=96 \
@@ -28,11 +37,12 @@ CUDA_VISIBLE_DEVICES=3 python src/lerobot/scripts/lerobot_train.py \
   --policy.device=cuda \
   --output_dir=/pfs/pfs-ilWc5D/ziqianwang/2rf_put_bottles_dustbin \
   --wandb.enable=true \
-  --wandb.project=aloha_smolvla \
+  --wandb.project=smolvla_reflow \
   --wandb.entity=christianwang-sjtu \
   --wandb.run_id=${RUN_ID} \
   --wandb.mode=online \
-  --policy.push_to_hub=false
+  --policy.push_to_hub=false \
+  --save_freq=5000
 
 # Notes:
 # - When use_reflow=true, student model automatically inherits teacher weights
