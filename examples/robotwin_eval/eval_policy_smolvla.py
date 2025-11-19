@@ -136,16 +136,30 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
     if not os.path.exists(policy_path):
         raise FileNotFoundError(f"Policy checkpoint not found: {policy_path}")
 
+    # Temporarily disable reflow in config.json for inference
+    # (Reflow should only be used during training, not inference)
+    config_path = os.path.join(policy_path, "config.json")
+    import json
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
+
+    # Remove reflow artifacts if present
+    reflow_removed = False
+    if config_dict.get('use_reflow', False):
+        config_dict['use_reflow'] = False
+        reflow_removed = True
+    if 'teacher_model_path' in config_dict:
+        del config_dict['teacher_model_path']
+
+    if reflow_removed:
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+        print("✓ Disabled reflow in config.json for inference")
+
     print(f"Loading from checkpoint: {policy_path}")
 
-    # Load policy (new checkpoints don't have reflow artifacts)
+    # Load policy (config now has use_reflow=False)
     policy = SmolVLAPolicy.from_pretrained(policy_path)
-
-    # Disable reflow for inference (should only be used during training)
-    if hasattr(policy.config, 'use_reflow') and policy.config.use_reflow:
-        policy.config.use_reflow = False
-        policy.model.config.use_reflow = False
-        print("✓ Disabled reflow for inference (use_reflow=False)")
 
     # Override num_steps in memory if specified (doesn't modify checkpoint file)
     if "num_steps" in usr_args:
