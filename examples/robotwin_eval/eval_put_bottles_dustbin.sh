@@ -13,7 +13,7 @@
 # ==========================
 
 # Policy settings
-POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints"
+POLICY_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow/checkpoints"
 CKPT_SETTING="last"  # Options: "last", "best", or specific checkpoint path
 
 # Task setting
@@ -21,7 +21,7 @@ TASK_NAME="put_bottles_dustbin"
 TASK_CONFIG="demo_clean"  # Options: "demo_clean", "randomized", etc.
 
 # Evaluation settings
-NUM_EPISODES=10 # Number of episodes to evaluate
+NUM_EPISODES=3 # Number of episodes to evaluate
 SEED=42
 INSTRUCTION_TYPE="seen"  # Options: "seen", "unseen"
 
@@ -32,7 +32,7 @@ N_ACTION_STEPS=50
 TOKENIZER_MAX_LENGTH=48
 
 # Denoising steps (optional - leave empty to use checkpoint's default)
-NUM_STEPS="5"  # Empty = use checkpoint default
+NUM_STEPS="10"  # Empty = use checkpoint default
 # NUM_STEPS=2  # Uncomment and set for 2-RF models
 
 # GPU settings
