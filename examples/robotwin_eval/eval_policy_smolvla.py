@@ -141,6 +141,12 @@ def load_model(usr_args: Dict) -> SmolVLAWrapper:
     # Load policy (new checkpoints don't have reflow artifacts)
     policy = SmolVLAPolicy.from_pretrained(policy_path)
 
+    # Disable reflow for inference (should only be used during training)
+    if hasattr(policy.config, 'use_reflow') and policy.config.use_reflow:
+        policy.config.use_reflow = False
+        policy.model.config.use_reflow = False
+        print("✓ Disabled reflow for inference (use_reflow=False)")
+
     # Override num_steps in memory if specified (doesn't modify checkpoint file)
     if "num_steps" in usr_args:
         original_num_steps = policy.config.num_steps
