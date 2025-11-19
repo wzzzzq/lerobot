@@ -467,6 +467,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
 
+        # Debug: Print action chunk shape
+        print(f"[DEBUG _get_action_chunk] action shape={actions.shape}, chunk_size={self.config.chunk_size}, num_steps={self.config.num_steps}")
+
         return actions
 
     def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
@@ -502,11 +505,16 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
 
+            # Debug: Print queue filling info
+            print(f"[DEBUG select_action] Filling action queue: actions_shape={actions.shape}, n_action_steps={self.config.n_action_steps}, queue_will_contain={actions.shape[1]} actions")
+
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
 
-        return self._queues[ACTION].popleft()
+        action = self._queues[ACTION].popleft()
+        print(f"[DEBUG select_action] Returning action, queue_remaining={len(self._queues[ACTION])}")
+        return action
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:
         """Do a full training forward pass to compute the loss"""
@@ -1094,6 +1102,9 @@ class VLAFlowMatching(nn.Module):
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)
             noise = self.sample_noise(actions_shape, device)
 
+        # Debug logging
+        print(f"[DEBUG sample_actions] Starting inference: chunk_size={self.config.chunk_size}, num_steps={self.config.num_steps}, noise_shape={noise.shape}")
+
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
@@ -1113,7 +1124,9 @@ class VLAFlowMatching(nn.Module):
 
         x_t = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        iteration_count = 0
         while time >= -dt / 2:
+            iteration_count += 1
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 prefix_pad_masks,
@@ -1124,6 +1137,8 @@ class VLAFlowMatching(nn.Module):
             # Euler step
             x_t += dt * v_t
             time += dt
+        
+        print(f"[DEBUG sample_actions] Completed {iteration_count} denoising iterations, output_shape={x_t.shape}")
         return x_t
 
     def denoise_step(

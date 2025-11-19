@@ -92,6 +92,11 @@ class SmolVLAWrapper:
         if self.observation_window is None:
             raise ValueError("Must call update_observation_window() first!")
 
+        # Debug: Print observation window info
+        if "observation.language_tokens" in self.observation_window:
+            lang_tokens = self.observation_window["observation.language_tokens"]
+            print(f"[DEBUG get_action] lang_tokens_shape={lang_tokens.shape}")
+
         # Get normalized action from policy (returns Tensor)
         action_tensor = self.policy.select_action(self.observation_window)
 
