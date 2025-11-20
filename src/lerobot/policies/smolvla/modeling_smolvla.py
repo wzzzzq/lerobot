@@ -242,20 +242,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
             ACTION: deque(maxlen=self.config.n_action_steps),
         }
 
-    def save_pretrained(self, save_directory: str, **kwargs):
-        """Save model checkpoint.
-
-        Note: Teacher model weights are NOT saved because:
-        - teacher is stored in self.model.teacher (not a parameter)
-        - Only self.parameters() are saved by PyTorch
-        - training_mode is a runtime attribute (not in config)
-
-        The saved checkpoint is identical to standard training checkpoint.
-        """
-        # Simply call parent's save_pretrained
-        # No special handling needed - teacher and training_mode are runtime state only
-        super().save_pretrained(save_directory, **kwargs)
-
     def get_optim_params(self) -> dict:
         return self.parameters()
 
