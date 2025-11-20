@@ -1,0 +1,13 @@
+--- examples/robotwin_eval/eval_policy_smolvla.py
++++ examples/robotwin_eval/eval_policy_smolvla.py
+@@ -214,6 +218,10 @@ def eval_step(TASK_ENV: Any, model: SmolVLAWrapper, observation: Dict) -> None:
+     # Get action from model
+     action = model.get_action()
+     
++    # Debug: Check if action contains NaN or Inf
++    import numpy as np
++    print(f"[DEBUG] Final action: has_nan={np.isnan(action).any()}, has_inf={np.isinf(action).any()}, shape={action.shape}, range=[{action.min():.4f}, {action.max():.4f}]")
++    
+     # Execute action in environment
+     TASK_ENV.take_action(action)
+ 

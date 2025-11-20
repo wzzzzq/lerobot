@@ -53,12 +53,8 @@ policy = SmolVLAPolicy.from_pretrained("lerobot/smolvla_base")
 """
 
 import math
-import os
-import re
 from collections import deque
-from pathlib import Path
 
-import safetensors
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
@@ -71,106 +67,6 @@ from lerobot.policies.utils import (
 )
 from lerobot.utils.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
 from lerobot.utils.utils import get_safe_dtype
-
-# Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
-_VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
-
-
-def canonicalise(k: str) -> str:
-    """
-    Remove dataset-variant markers like '.so100-blue_' or '.so100_' from a
-    normalisation-buffer key.
-    """
-    return _VARIANT_RE.sub(".buffer_", k)
-
-
-def standardise_state_dict(
-    checkpoint: dict[str, torch.Tensor], ref_keys: set[str], *, verbose: bool = True
-) -> tuple[dict[str, torch.Tensor], list[str]]:
-    """
-    • Re-keys `checkpoint` so that every entry matches the *reference* key set.
-    • If several variant keys collapse to the same canonical name we keep the
-      first one and log the collision.
-    • Returns the new dict + a list of entries that could not be matched.
-    """
-    out, collisions, unmatched = {}, {}, []
-
-    for k, v in checkpoint.items():
-        canon = canonicalise(k)
-        if canon in ref_keys:
-            if canon in out:  # duplicate after collapsing
-                collisions.setdefault(canon, []).append(k)
-            else:
-                out[canon] = v
-        else:
-            unmatched.append(k)
-
-    if verbose:
-        for canon, variants in collisions.items():
-            print(f"[standardise_state_dict] '{canon}'  ←  {variants}")
-        if unmatched:
-            print(f"[standardise_state_dict] kept {len(unmatched)} unmatched keys")
-            for key in unmatched:
-                print(f"  - {key}")
-
-    out.update({k: checkpoint[k] for k in unmatched})
-    return out, unmatched
-
-
-def rename_checkpoint_keys(checkpoint: dict, rename_str: str):
-    """
-    Renames keys in a checkpoint dictionary based on the given rename string.
-
-    Args:
-        checkpoint (dict): The checkpoint dictionary.
-        rename_str (str): A string specifying key mappings in the format "old1//new1,old2//new2".
-
-    Returns:
-        dict: The modified checkpoint with renamed keys.
-    """
-
-    rename_dict = dict(pair.split("//") for pair in rename_str.split(","))
-
-    new_checkpoint = {}
-    for k, v in checkpoint.items():
-        for old_key, new_key in rename_dict.items():
-            if old_key in k:
-                k = k.replace(old_key, new_key)
-        new_checkpoint[k] = v
-    return new_checkpoint
-
-
-def load_smolvla(
-    model: torch.nn.Module,
-    filename: str | os.PathLike,
-    *,
-    device: str = "cpu",
-    checkpoint_keys_mapping: str = "",
-) -> torch.nn.Module:
-    state_dict = safetensors.torch.load_file(filename, device=device)
-
-    # Filter out teacher model weights early (saved during reflow training, not needed for loading)
-    teacher_keys_prefix = "model._teacher_model."
-    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(teacher_keys_prefix)}
-
-    # Optional user-supplied renames (e.g. "model._orig_mod.//model.")
-    if checkpoint_keys_mapping and "//" in checkpoint_keys_mapping:
-        state_dict = rename_checkpoint_keys(state_dict, checkpoint_keys_mapping)
-
-    state_dict, _ = standardise_state_dict(state_dict, set(model.state_dict().keys()))
-
-    # HACK(aliberts): to not overwrite normalization parameters as they should come from the dataset
-    norm_keys = ("normalize_inputs", "normalize_targets", "unnormalize_outputs")
-    state_dict = {k: v for k, v in state_dict.items() if not k.startswith(norm_keys)}
-
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-
-    if not all(key.startswith(norm_keys) for key in missing) or unexpected:
-        raise RuntimeError(
-            f"SmolVLA {len(missing)} missing / {len(unexpected)} unexpected keys"
-        )
-
-    return model
 
 
 def create_sinusoidal_pos_embedding(
@@ -337,19 +233,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         config.validate_features()
         self.config = config
 
-        # Reflow: Ensure train_expert_only=True to freeze VLM
-        if config.use_reflow:
-            if not config.train_expert_only:
-                print("[Reflow] Setting train_expert_only=True to freeze VLM for reflow training")
-                config.train_expert_only = True
-
         self.model = VLAFlowMatching(config)
-
-        # Reflow: Automatically initialize student from teacher weights
-        if config.use_reflow and config.teacher_model_path:
-            self._init_student_from_teacher()
-            self._log_trainable_params()
-
         self.reset()
 
     def reset(self):
@@ -358,90 +242,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             ACTION: deque(maxlen=self.config.n_action_steps),
         }
 
-    def _init_student_from_teacher(self):
-        """Initialize student model weights from teacher model for Reflow training.
-
-        This method loads the teacher model weights into the student model, ensuring
-        that the student starts from the same pretrained checkpoint as the teacher.
-        This is consistent with the official RectifiedFlow implementation.
-        """
-        print(f"[Reflow] Initializing student model from teacher: {self.config.teacher_model_path}")
-
-        # Load teacher model weights using the class's from_pretrained method
-        teacher_policy = self.__class__.from_pretrained(self.config.teacher_model_path)
-
-        # Copy weights from teacher to student
-        self.load_state_dict(teacher_policy.state_dict(), strict=False)
-
-        print("[Reflow] Student model initialized with teacher weights")
-
-        # Clean up teacher model to save memory
-        del teacher_policy
-        import gc
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    def _log_trainable_params(self):
-        """Log trainable parameter statistics for Reflow training."""
-        total_params = sum(p.numel() for p in self.parameters())
-        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"[Reflow] Total parameters: {total_params:,}")
-        print(f"[Reflow] Trainable parameters: {trainable_params:,} ({100*trainable_params/total_params:.2f}%)")
-
     def get_optim_params(self) -> dict:
         return self.parameters()
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        """Override save_pretrained to exclude reflow training artifacts.
-
-        This ensures that saved checkpoints:
-        1. Don't include use_reflow=True or teacher_model_path in config
-        2. Don't include teacher model weights in state_dict
-
-        These are only needed during reflow training, not for inference.
-        """
-        from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-
-        # Save config without reflow artifacts
-        config_to_save = self.config.__class__(**{
-            k: v for k, v in vars(self.config).items()
-            if k not in ('use_reflow', 'teacher_model_path')
-        })
-        config_to_save._save_pretrained(save_directory)
-
-        # Save model weights without teacher model
-        model_to_save = self.module if hasattr(self, "module") else self
-        state_dict = model_to_save.state_dict()
-
-        # Filter out teacher model weights (saved during reflow training but not needed)
-        state_dict_filtered = {
-            k: v for k, v in state_dict.items()
-            if not k.startswith('model._teacher_model.')
-        }
-
-        # Save filtered state dict using safetensors
-        safetensors.torch.save_file(
-            state_dict_filtered,
-            str(save_directory / SAFETENSORS_SINGLE_FILE)
-        )
-
-    @classmethod
-    def _load_as_safetensor(
-        cls,
-        model: "SmolVLAPolicy",
-        model_file: str,
-        map_location: str,
-        strict: bool,
-    ):
-        """Custom loading method that handles parameter name mismatches between pretrained model and dataset."""
-        # Note: safetensors.torch.load_model is not used here because load_smolvla handles the loading
-        return load_smolvla(
-            model,
-            model_file,
-            device=map_location,
-            checkpoint_keys_mapping="model._orig_mod.//model.",
-        )
 
     def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
         # TODO: Check if this for loop is needed.
@@ -466,9 +268,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
-
-        # Debug: Print action chunk shape
-        print(f"[DEBUG _get_action_chunk] action shape={actions.shape}, chunk_size={self.config.chunk_size}, num_steps={self.config.num_steps}")
 
         return actions
 
@@ -505,16 +304,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
 
-            # Debug: Print queue filling info
-            print(f"[DEBUG select_action] Filling action queue: actions_shape={actions.shape}, n_action_steps={self.config.n_action_steps}, queue_will_contain={actions.shape[1]} actions")
-
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
 
-        action = self._queues[ACTION].popleft()
-        print(f"[DEBUG select_action] Returning action, queue_remaining={len(self._queues[ACTION])}")
-        return action
+        return self._queues[ACTION].popleft()
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:
         """Do a full training forward pass to compute the loss"""
@@ -530,13 +324,16 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        loss_dict["losses_after_forward"] = losses.clone()
 
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
+            loss_dict["losses_after_in_ep_bound"] = losses.clone()
 
         # Remove padding
         losses = losses[:, :, : self.config.max_action_dim]
+        loss_dict["losses_after_rm_padding"] = losses.clone()
 
         # For backward pass
         loss = losses.mean()
@@ -871,194 +668,10 @@ class VLAFlowMatching(nn.Module):
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
         return embs, pad_masks, att_masks
 
-    def load_teacher_model(self):
-        """Load teacher model for Reflow training (lazy loading with VLM sharing).
-
-        The teacher model shares the same VLM with the student model to save GPU memory.
-        Only the expert layers are separate between teacher and student.
-        """
-        if not hasattr(self, "_teacher_model") or self._teacher_model is None:
-            if self.config.teacher_model_path is None:
-                raise ValueError("teacher_model_path must be set when use_reflow=True")
-
-            from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-
-            print(f"[Reflow] Loading teacher model from {self.config.teacher_model_path}")
-            self._teacher_model = SmolVLAPolicy.from_pretrained(self.config.teacher_model_path)
-            self._teacher_model.eval()
-
-            # Keep teacher on same device and dtype as student model
-            device = next(self.parameters()).device
-            dtype = next(self.parameters()).dtype
-            self._teacher_model = self._teacher_model.to(device=device, dtype=dtype)
-
-            # Share VLM between teacher and student to save GPU memory
-            # Since VLM is frozen and identical in both models, we can safely share it
-            print("[Reflow] Sharing VLM between teacher and student to save GPU memory")
-            teacher_vlm = self._teacher_model.model.vlm_with_expert.vlm
-            student_vlm = self.vlm_with_expert.vlm
-
-            # Calculate memory saved
-            vlm_params = sum(p.numel() * p.element_size() for p in teacher_vlm.parameters())
-            memory_saved_gb = vlm_params / (1024**3)
-
-            # Replace teacher's VLM with student's VLM (shared reference)
-            self._teacher_model.model.vlm_with_expert.vlm = student_vlm
-
-            print(f"[Reflow] VLM sharing enabled - saved ~{memory_saved_gb:.2f} GB GPU memory")
-
-            # Freeze teacher model
-            for param in self._teacher_model.parameters():
-                param.requires_grad = False
-
-        return self._teacher_model
-
-    @torch.no_grad()
-    def generate_reflow_target(self, images, img_masks, lang_tokens, lang_masks, state, noise):
-        """Generate X_1 from teacher model using ODE solver (Euler method).
-
-        This implements the data pair generation step in Reflow (Algorithm 1):
-        X_0 ~ N(0, 1) (noise)
-        X_1 = ODE[v_k](X_0 | T) = X_0 + ∫_0^1 v_k(X_t, t | T) dt
-
-        The ODE solver uses the same num_steps as the teacher model.
-
-        Args:
-            images, img_masks, lang_tokens, lang_masks, state: Input observations
-            noise: X_0, sampled from N(0, 1)
-
-        Returns:
-            X_1: Generated actions from teacher model via ODE integration
-        """
-        teacher = self.load_teacher_model()
-
-        bsize = noise.shape[0]
-        device = noise.device
-
-        # Get prefix embeddings and cache (shared across denoising steps)
-        prefix_embs, prefix_pad_masks, prefix_att_masks = teacher.model.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
-
-        # Create position_ids and attention_mask from prefix masks
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-
-        _, past_key_values = teacher.model.vlm_with_expert.forward(
-            attention_mask=prefix_att_2d_masks,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=True,
-            fill_kv_cache=True,
-        )
-
-        # Use teacher model's num_steps (same as it was trained with)
-        num_steps = teacher.model.config.num_steps
-        dt = -1.0 / num_steps  # negative because going from t=1 to t=0
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
-
-        x_t = noise.clone()  # Start from noise (t=1)
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-
-        # Euler ODE solver: x_t += dt * v_t
-        while time >= -dt / 2:  # Iterate until t=0
-            expanded_time = time.expand(bsize)
-
-            # Predict velocity at current timestep using teacher model
-            v_t = teacher.model.denoise_step(
-                prefix_pad_masks,
-                past_key_values,
-                x_t,
-                expanded_time,
-            )
-
-            # Euler step: x_{t+dt} = x_t + dt * v_t
-            x_t = x_t + dt * v_t
-            time = time + dt
-
-        return x_t  # This is X_1
-
-    def forward_reflow(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
-    ) -> Tensor:
-        """Reflow training forward pass (Rectified Flow).
-
-        Implements Equation 5 from Reflow paper:
-        L_reflow = E[ ∫ ||(X_1 - X_0) - v_{k+1}(X_t, t)||^2 dt ]
-
-        Where:
-        - X_0 ~ N(0, 1): noise
-        - X_1 = ODE[v_k](X_0|T): generated by teacher model v_k
-        - X_t = (1-t)*X_0 + t*X_1: linear interpolation
-        - (X_1 - X_0): straight-line velocity (target)
-        - v_{k+1}: student model (being trained)
-
-        The key difference from standard Flow Matching:
-        - Standard FM: u_t = noise - actions (curved trajectory)
-        - Reflow: u_t = X_1 - X_0 (straightened trajectory)
-        """
-        if noise is None:
-            noise = self.sample_noise(actions.shape, actions.device)  # X_0
-
-        # Generate X_1 using teacher model via ODE
-        # X_1 = ODE[v_k](X_0 | T)
-        X_1 = self.generate_reflow_target(images, img_masks, lang_tokens, lang_masks, state, noise)
-        X_0 = noise
-
-        # Sample timestep
-        if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
-
-        # Linear interpolation: X_t = (1-t)*X_0 + t*X_1
-        time_expanded = time[:, None, None]
-        X_t = (1 - time_expanded) * X_0 + time_expanded * X_1
-
-        # Straight-line velocity: u_t = X_1 - X_0
-        # This is the key difference from standard Flow Matching
-        u_t = X_1 - X_0
-
-        # Get embeddings for student model
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(X_t, time)
-
-        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-
-        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-        position_ids = torch.cumsum(pad_masks, dim=1) - 1
-
-        # Forward through student model
-        (_, suffix_out), _ = self.vlm_with_expert.forward(
-            attention_mask=att_2d_masks,
-            position_ids=position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, suffix_embs],
-            use_cache=False,
-            fill_kv_cache=False,
-        )
-
-        suffix_out = suffix_out[:, -self.config.chunk_size :]
-        suffix_out = suffix_out.to(dtype=torch.float32)
-
-        # Predict velocity with student model
-        v_t = self.action_out_proj(suffix_out)
-
-        # MSE loss between predicted velocity and straight-line velocity
-        losses = F.mse_loss(u_t, v_t, reduction="none")
-        return losses
-
     def forward(
         self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
     ) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
-        # Use Reflow training if enabled
-        if self.config.use_reflow:
-            return self.forward_reflow(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
-
-        # Standard Flow Matching training
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -1102,9 +715,6 @@ class VLAFlowMatching(nn.Module):
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)
             noise = self.sample_noise(actions_shape, device)
 
-        # Debug logging
-        print(f"[DEBUG sample_actions] Starting inference: chunk_size={self.config.chunk_size}, num_steps={self.config.num_steps}, noise_shape={noise.shape}")
-
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
@@ -1124,9 +734,7 @@ class VLAFlowMatching(nn.Module):
 
         x_t = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        iteration_count = 0
         while time >= -dt / 2:
-            iteration_count += 1
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 prefix_pad_masks,
@@ -1137,8 +745,6 @@ class VLAFlowMatching(nn.Module):
             # Euler step
             x_t += dt * v_t
             time += dt
-        
-        print(f"[DEBUG sample_actions] Completed {iteration_count} denoising iterations, output_shape={x_t.shape}")
         return x_t
 
     def denoise_step(

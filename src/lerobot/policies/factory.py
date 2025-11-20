@@ -100,8 +100,11 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
 
         return Classifier
     elif name == "smolvla":
+        # Import base SmolVLAPolicy
         from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-
+        
+        # If config specifies use_reflow, return the Reflow variant
+        # Note: This check is done in make_policy() which has access to the config
         return SmolVLAPolicy
     elif name == "groot":
         from lerobot.policies.groot.modeling_groot import GrootPolicy
@@ -385,6 +388,12 @@ def make_policy(
         )
 
     policy_cls = get_policy_class(cfg.type)
+    
+    # Check if we need to use Reflow variant for SmolVLA
+    if cfg.type == "smolvla" and hasattr(cfg, "use_reflow") and cfg.use_reflow:
+        from lerobot.policies.smolvla.modeling_smolvla_reflow import SmolVLAReflowPolicy
+        policy_cls = SmolVLAReflowPolicy
+        logging.info("Using SmolVLAReflowPolicy for Reflow training")
 
     # Warn if instantiating from scratch with environment features
     if env_cfg is not None and not cfg.pretrained_path:
