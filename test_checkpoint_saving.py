@@ -21,29 +21,33 @@ def test_checkpoint_structure():
     print("=" * 80)
     print()
 
-    # Read the save_pretrained method
+    # Read the model code
     model_path = "/home/user/lerobot/src/lerobot/policies/smolvla/modeling_smolvla.py"
     with open(model_path, "r") as f:
         model_code = f.read()
 
-    # Check that save_pretrained method exists
-    if "def save_pretrained(" in model_code:
-        print("✓ SmolVLAPolicy has save_pretrained method")
-    else:
-        print("✗ save_pretrained method NOT found")
+    # Check that save_pretrained is NOT overridden (uses parent's implementation)
+    smolvla_class_start = model_code.find("class SmolVLAPolicy")
+    if smolvla_class_start == -1:
+        print("✗ SmolVLAPolicy class not found")
         return False
 
-    # Check that training_mode is reset
-    if 'config_dict[\'training_mode\'] = "standard"' in model_code:
-        print("✓ training_mode is reset to 'standard' when saving")
-    else:
-        print("⚠ training_mode might not be reset when saving")
+    smolvla_class_code = model_code[smolvla_class_start:]
+    next_class = smolvla_class_code.find("class ", 1)
+    if next_class != -1:
+        smolvla_class_code = smolvla_class_code[:next_class]
 
-    # Check that there's a note about teacher weights
-    if "teacher weights are NOT saved" in model_code or "teacher is not part of self.parameters()" in model_code:
-        print("✓ Documentation confirms teacher weights are not saved")
+    if "def save_pretrained(" not in smolvla_class_code:
+        print("✓ SmolVLAPolicy does NOT override save_pretrained (uses parent's implementation)")
+        print("✓ No special handling needed - teacher and training_mode are runtime state")
     else:
-        print("⚠ No explicit documentation about teacher weights")
+        print("⚠ SmolVLAPolicy overrides save_pretrained (may be unnecessary)")
+
+    # Check that teacher and training_mode are runtime attributes
+    if "self.teacher = None" in model_code and "self.training_mode = " in model_code:
+        print("✓ teacher and training_mode are runtime attributes (not parameters)")
+    else:
+        print("⚠ Could not verify runtime attributes")
 
     print()
     return True
