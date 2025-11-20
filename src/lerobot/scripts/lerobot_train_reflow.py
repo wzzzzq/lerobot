@@ -23,12 +23,15 @@ It loads a teacher model AND initializes the student from the same checkpoint.
 Key differences from standard training:
 1. Student model is initialized from teacher_model_path (NOT created fresh)
 2. Teacher model is loaded from teacher_model_path and attached to student
-3. Sets policy.model.training_mode = "reflow" (runtime state)
-4. Uses smaller learning rate (typically 2e-5 vs 1e-4)
+3. Automatically freezes VLM and vision encoder (only trains expert/action head)
+4. Sets policy.model.training_mode = "reflow" (runtime state)
+5. Uses smaller learning rate (typically 2e-5 vs 1e-4)
 
-Important: Both teacher and student load from the SAME checkpoint path.
-This is correct for reflow - the student starts with teacher's weights,
-then is fine-tuned to straighten the trajectories.
+Important:
+- Both teacher and student load from the SAME checkpoint path
+- VLM and vision encoder are ALWAYS frozen (no config needed)
+- Only expert (action head) and flow matching components are trained
+- Student starts with teacher's weights, then fine-tuned to straighten trajectories
 
 Usage:
     python lerobot_train_reflow.py \\
@@ -54,6 +57,9 @@ def setup_reflow_training(cfg, ds_meta):
     In reflow training, the student should be initialized from the teacher's weights,
     then fine-tuned to straighten the trajectories.
 
+    Important: Reflow training AUTOMATICALLY freezes VLM and vision encoder.
+    Only the expert (action head) and flow matching components are trained.
+
     Note: training_mode is NOT in config - it's a runtime state set by this function.
 
     Args:
@@ -62,6 +68,7 @@ def setup_reflow_training(cfg, ds_meta):
 
     Returns:
         Student policy initialized from teacher checkpoint with teacher attached
+        and VLM/vision encoder frozen
     """
     if cfg.policy.type != "smolvla":
         raise ValueError("Reflow training is only supported for smolvla policy")
@@ -93,21 +100,19 @@ def setup_reflow_training(cfg, ds_meta):
     logging.info(f"[Reflow] Initializing student model from {teacher_path}")
     student = SmolVLAPolicy.from_pretrained(teacher_path)
 
-    # Apply training configuration to student
-    # These settings may differ from the original training
-    if hasattr(cfg.policy, "freeze_vision_encoder"):
-        # Re-apply freezing settings based on current config
-        if cfg.policy.freeze_vision_encoder:
-            logging.info("[Reflow] Freezing vision encoder")
-            for param in student.model.vlm_with_expert.vlm.vision_tower.parameters():
-                param.requires_grad = False
-            for param in student.model.vlm_with_expert.vlm.vision_encoder.parameters():
-                param.requires_grad = False
+    # Reflow training ALWAYS freezes VLM and vision encoder
+    # Only train the expert (action head) and flow matching components
+    logging.info("[Reflow] Freezing vision encoder and language model (reflow only trains expert)")
 
-    if hasattr(cfg.policy, "train_expert_only") and cfg.policy.train_expert_only:
-        logging.info("[Reflow] Training expert only (freezing VLM language model)")
-        for param in student.model.vlm_with_expert.vlm.language_model.parameters():
-            param.requires_grad = False
+    # Freeze vision encoder
+    for param in student.model.vlm_with_expert.vlm.vision_tower.parameters():
+        param.requires_grad = False
+    for param in student.model.vlm_with_expert.vlm.vision_encoder.parameters():
+        param.requires_grad = False
+
+    # Freeze language model
+    for param in student.model.vlm_with_expert.vlm.language_model.parameters():
+        param.requires_grad = False
 
     # Attach teacher to student model
     student.model.teacher = teacher

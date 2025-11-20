@@ -259,6 +259,34 @@ student.model.training_mode = "reflow"
 - 这比从头训练快得多，并且保留了 Teacher 学到的特征
 - 学习率通常较小（2e-5 vs 1e-4），因为只需要微调
 
+### Reflow 训练自动冻结 VLM 和 Vision Encoder
+
+**重要：Reflow 训练时自动冻结 VLM 和 vision encoder，无需配置参数。**
+
+在 `setup_reflow_training()` 中：
+
+```python
+# 自动冻结（不需要配置参数）
+# Freeze vision encoder
+for param in student.model.vlm_with_expert.vlm.vision_tower.parameters():
+    param.requires_grad = False
+for param in student.model.vlm_with_expert.vlm.vision_encoder.parameters():
+    param.requires_grad = False
+
+# Freeze language model
+for param in student.model.vlm_with_expert.vlm.language_model.parameters():
+    param.requires_grad = False
+```
+
+**只训练的部分：**
+- Expert (action head)
+- Flow matching 相关的参数
+
+**原因：**
+- VLM 和 vision encoder 已经在标准训练中充分训练
+- Reflow 只需要调整 action space 的轨迹映射
+- 冻结这些模块可以加速训练并节省显存
+
 **对比：**
 
 ```python
