@@ -120,7 +120,8 @@ echo "Key differences from old implementation:"
 echo "  - training_mode is runtime state (not in config)"
 echo "  - teacher_model_path is passed as argument"
 echo "  - Uses single SmolVLAPolicy class (no SmolVLAReflowPolicy)"
-echo "  - Teacher model loaded and attached by training script"
+echo "  - Both teacher AND student load from teacher_model_path"
+echo "  - Student initialized from teacher weights, then fine-tuned"
 echo ""
 
 # Use lerobot_train_reflow.py which sets up reflow training automatically

@@ -18,18 +18,21 @@
 Reflow training script for SmolVLA.
 
 This script extends the standard lerobot_train.py to support Reflow (Rectified Flow) training.
-It loads a teacher model and sets it to the student model before training begins.
+It loads a teacher model AND initializes the student from the same checkpoint.
 
 Key differences from standard training:
-1. Loads teacher model from teacher_model_path
-2. Sets policy.model.teacher to the loaded teacher model
-3. Sets policy.model.training_mode = "reflow"
+1. Student model is initialized from teacher_model_path (NOT created fresh)
+2. Teacher model is loaded from teacher_model_path and attached to student
+3. Sets policy.model.training_mode = "reflow" (runtime state)
 4. Uses smaller learning rate (typically 2e-5 vs 1e-4)
+
+Important: Both teacher and student load from the SAME checkpoint path.
+This is correct for reflow - the student starts with teacher's weights,
+then is fine-tuned to straighten the trajectories.
 
 Usage:
     python lerobot_train_reflow.py \\
         --policy.type=smolvla \\
-        --policy.training_mode=reflow \\
         --policy.teacher_model_path=/path/to/teacher \\
         --policy.optimizer_lr=2e-5 \\
         --dataset.repo_id=your_dataset \\
@@ -45,17 +48,20 @@ sys.path.insert(0, os.path.dirname(__file__))
 from lerobot_train import *  # noqa: F403, E402
 
 
-def setup_reflow_training(cfg, policy):
-    """Setup reflow training by loading teacher model.
+def setup_reflow_training(cfg, ds_meta):
+    """Setup reflow training by loading both teacher and student from teacher checkpoint.
+
+    In reflow training, the student should be initialized from the teacher's weights,
+    then fine-tuned to straighten the trajectories.
 
     Note: training_mode is NOT in config - it's a runtime state set by this function.
 
     Args:
         cfg: Training configuration
-        policy: Student policy model
+        ds_meta: Dataset metadata
 
     Returns:
-        Modified policy with teacher model attached and training_mode set to "reflow"
+        Student policy initialized from teacher checkpoint with teacher attached
     """
     if cfg.policy.type != "smolvla":
         raise ValueError("Reflow training is only supported for smolvla policy")
@@ -80,27 +86,45 @@ def setup_reflow_training(cfg, policy):
     for param in teacher.parameters():
         param.requires_grad = False
 
-    # Move teacher to same device/dtype as student
-    device = next(policy.model.parameters()).device
-    dtype = next(policy.model.parameters()).dtype
-    teacher = teacher.to(device=device, dtype=dtype)
+    logging.info("[Reflow] ✓ Teacher model loaded")
+
+    # Initialize student from the same checkpoint (this is key for reflow!)
+    # The student starts with the same weights as the teacher, then is fine-tuned
+    logging.info(f"[Reflow] Initializing student model from {teacher_path}")
+    student = SmolVLAPolicy.from_pretrained(teacher_path)
+
+    # Apply training configuration to student
+    # These settings may differ from the original training
+    if hasattr(cfg.policy, "freeze_vision_encoder"):
+        # Re-apply freezing settings based on current config
+        if cfg.policy.freeze_vision_encoder:
+            logging.info("[Reflow] Freezing vision encoder")
+            for param in student.model.vlm_with_expert.vlm.vision_tower.parameters():
+                param.requires_grad = False
+            for param in student.model.vlm_with_expert.vlm.vision_encoder.parameters():
+                param.requires_grad = False
+
+    if hasattr(cfg.policy, "train_expert_only") and cfg.policy.train_expert_only:
+        logging.info("[Reflow] Training expert only (freezing VLM language model)")
+        for param in student.model.vlm_with_expert.vlm.language_model.parameters():
+            param.requires_grad = False
 
     # Attach teacher to student model
-    policy.model.teacher = teacher
+    student.model.teacher = teacher
 
-    # Ensure training_mode is set correctly
-    policy.model.training_mode = "reflow"
+    # Set training mode to reflow (runtime state, not in config)
+    student.model.training_mode = "reflow"
 
-    logging.info("[Reflow] ✓ Teacher model loaded and attached to student")
-    logging.info(f"[Reflow] ✓ Training mode: {policy.model.training_mode}")
+    logging.info("[Reflow] ✓ Student initialized from teacher checkpoint")
+    logging.info(f"[Reflow] ✓ Training mode: {student.model.training_mode}")
 
     # Log parameter counts
-    total_params = sum(p.numel() for p in policy.parameters())
-    trainable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in student.parameters())
+    trainable_params = sum(p.numel() for p in student.parameters() if p.requires_grad)
     logging.info(f"[Reflow] Total parameters: {total_params:,}")
     logging.info(f"[Reflow] Trainable parameters: {trainable_params:,} ({100*trainable_params/total_params:.2f}%)")
 
-    return policy
+    return student
 
 
 def main():
@@ -119,13 +143,10 @@ def main():
     logging.info("Making dataset...")
     ds_meta, train_dataloader = make_dataset(cfg)  # noqa: F405
 
-    # Make policy
-    logging.info("Making policy...")
-    policy = make_policy(cfg.policy, ds_meta=ds_meta)  # noqa: F405
+    # Setup reflow training (loads both teacher and student from teacher checkpoint)
+    # NOTE: Student is initialized from teacher's weights, NOT created fresh
+    policy = setup_reflow_training(cfg, ds_meta)
     pre_processor, post_processor = make_pre_post_processors(cfg.policy)  # noqa: F405
-
-    # Setup reflow training (this script is specifically for reflow)
-    policy = setup_reflow_training(cfg, policy)
 
     # Make optimizer and scheduler
     logging.info("Making optimizer and scheduler...")

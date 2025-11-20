@@ -210,7 +210,6 @@ config = SmolVLAConfig(
 2. Reflow 训练（2-RF）
    ↓
    python lerobot_train_reflow.py \
-     --policy.training_mode=reflow \
      --policy.teacher_model_path=checkpoint_1rf/ \
      --policy.optimizer_lr=2e-5 \
      --steps=20000
@@ -221,6 +220,56 @@ config = SmolVLAConfig(
    ↓
    policy = SmolVLAPolicy.from_pretrained("checkpoint_2rf/")
    actions = policy.select_action(obs)
+```
+
+### 重要：Student 模型初始化
+
+**问题：Student 模型会从 teacher_model_path 加载吗？**
+
+**答案：是的！这是 Reflow 训练的关键设计。**
+
+在 Reflow 训练中：
+1. **Teacher 模型**：从 `teacher_model_path` 加载，用于生成 ODE 轨迹（X_1）
+2. **Student 模型**：也从 `teacher_model_path` 加载，从 Teacher 的权重开始
+
+这是正确的设计，因为：
+
+```python
+# setup_reflow_training() 的关键代码：
+
+# 1. 加载 Teacher 模型
+teacher = SmolVLAPolicy.from_pretrained(teacher_path)
+teacher.eval()  # 冻结
+
+# 2. 从同样的 checkpoint 初始化 Student
+# 关键：Student 不是从头开始训练，而是从 Teacher 的权重开始
+student = SmolVLAPolicy.from_pretrained(teacher_path)
+
+# 3. 将 Teacher 附加到 Student
+student.model.teacher = teacher
+student.model.training_mode = "reflow"
+
+# 4. Student 通过 Reflow loss 微调，学习更直的轨迹
+```
+
+**为什么这样设计？**
+
+- Reflow 不是从头训练新模型，而是"拉直"已有模型的轨迹
+- Student 从 Teacher 的权重开始，然后通过梯度下降学习更直的路径
+- 这比从头训练快得多，并且保留了 Teacher 学到的特征
+- 学习率通常较小（2e-5 vs 1e-4），因为只需要微调
+
+**对比：**
+
+```python
+# ✗ 错误方式（从头创建 Student）
+student = make_policy(cfg.policy, ds_meta=ds_meta)  # 随机初始化
+teacher = load_teacher(teacher_path)
+
+# ✓ 正确方式（从 Teacher 开始）
+teacher = SmolVLAPolicy.from_pretrained(teacher_path)
+student = SmolVLAPolicy.from_pretrained(teacher_path)  # 复制 Teacher 的权重
+student.model.teacher = teacher
 ```
 
 ## 超参数建议
