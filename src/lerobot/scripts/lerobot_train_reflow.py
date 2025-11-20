@@ -48,18 +48,17 @@ from lerobot_train import *  # noqa: F403, E402
 def setup_reflow_training(cfg, policy):
     """Setup reflow training by loading teacher model.
 
+    Note: training_mode is NOT in config - it's a runtime state set by this function.
+
     Args:
         cfg: Training configuration
         policy: Student policy model
 
     Returns:
-        Modified policy with teacher model attached
+        Modified policy with teacher model attached and training_mode set to "reflow"
     """
     if cfg.policy.type != "smolvla":
         raise ValueError("Reflow training is only supported for smolvla policy")
-
-    if cfg.policy.training_mode != "reflow":
-        logging.warning("training_mode is not set to 'reflow'. Reflow training may not work correctly.")
 
     teacher_path = getattr(cfg.policy, "teacher_model_path", None)
     if not teacher_path:
@@ -125,9 +124,8 @@ def main():
     policy = make_policy(cfg.policy, ds_meta=ds_meta)  # noqa: F405
     pre_processor, post_processor = make_pre_post_processors(cfg.policy)  # noqa: F405
 
-    # Setup reflow training if enabled
-    if cfg.policy.training_mode == "reflow":
-        policy = setup_reflow_training(cfg, policy)
+    # Setup reflow training (this script is specifically for reflow)
+    policy = setup_reflow_training(cfg, policy)
 
     # Make optimizer and scheduler
     logging.info("Making optimizer and scheduler...")

@@ -102,9 +102,6 @@ class SmolVLAConfig(PreTrainedConfig):
     min_period: float = 4e-3  # sensitivity range for the timestep used in sine-cosine positional encoding
     max_period: float = 4.0
 
-    # Training mode: "standard" for normal Flow Matching, "reflow" for Rectified Flow training
-    training_mode: str = "standard"  # Options: "standard", "reflow"
-
     def __post_init__(self):
         super().__post_init__()
 

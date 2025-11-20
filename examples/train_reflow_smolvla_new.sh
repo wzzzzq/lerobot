@@ -117,19 +117,17 @@ echo ""
 echo "Starting Reflow training with new architecture..."
 echo ""
 echo "Key differences from old implementation:"
-echo "  - training_mode='reflow' enables reflow loss"
-echo "  - teacher_model_path is passed as a training argument"
+echo "  - training_mode is runtime state (not in config)"
+echo "  - teacher_model_path is passed as argument"
 echo "  - Uses single SmolVLAPolicy class (no SmolVLAReflowPolicy)"
-echo "  - Teacher model loaded in training script"
+echo "  - Teacher model loaded and attached by training script"
 echo ""
 
-# Note: We need to load teacher model and set it to policy.model.teacher
-# This is typically done in the training script modification
-# For now, we use the same lerobot_train.py with additional argument
+# Use lerobot_train_reflow.py which sets up reflow training automatically
+# No need to specify training_mode - it's set by the training script
 CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train_reflow.py \
   --policy.type=smolvla \
   --policy.push_to_hub=false \
-  --policy.training_mode=reflow \
   --policy.teacher_model_path="$TEACHER_MODEL_PATH" \
   --policy.freeze_vision_encoder=true \
   --policy.train_expert_only=true \

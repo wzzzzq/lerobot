@@ -242,6 +242,20 @@ class SmolVLAPolicy(PreTrainedPolicy):
             ACTION: deque(maxlen=self.config.n_action_steps),
         }
 
+    def save_pretrained(self, save_directory: str, **kwargs):
+        """Save model checkpoint.
+
+        Note: Teacher model weights are NOT saved because:
+        - teacher is stored in self.model.teacher (not a parameter)
+        - Only self.parameters() are saved by PyTorch
+        - training_mode is a runtime attribute (not in config)
+
+        The saved checkpoint is identical to standard training checkpoint.
+        """
+        # Simply call parent's save_pretrained
+        # No special handling needed - teacher and training_mode are runtime state only
+        super().save_pretrained(save_directory, **kwargs)
+
     def get_optim_params(self) -> dict:
         return self.parameters()
 
@@ -511,9 +525,9 @@ class VLAFlowMatching(nn.Module):
         self.image_end_token = torch.tensor([self.fake_image_token], dtype=torch.long)
         self.prefix_length = self.config.prefix_length
 
-        # Reflow training support
+        # Reflow training support (runtime state, not config)
         self.teacher = None  # Set by training script when using reflow
-        self.training_mode = getattr(config, "training_mode", "standard")  # "standard" or "reflow"
+        self.training_mode = "standard"  # "standard" or "reflow", set by training script
 
     def set_requires_grad(self):
         for params in self.state_proj.parameters():
