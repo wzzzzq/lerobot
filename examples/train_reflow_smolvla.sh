@@ -1,13 +1,19 @@
 #!/bin/bash
 
-# SmolVLA Reflow Training Script
+# SmolVLA Reflow Training Script (New Architecture)
 # Train a 2-Rectified Flow model from an existing teacher model checkpoint
 #
-# New Reflow Structure (After Refactoring):
-# - Uses SmolVLAReflowPolicy (automatically selected when use_reflow=true)
-# - VLM loaded only ONCE (teacher first, student copies weights)
-# - VLM automatically frozen (train_expert_only=true set in SmolVLAReflowPolicy)
-# - Clean code separation in modeling_smolvla_reflow.py
+# New Reflow Architecture:
+# - Reflow is a training method, not a separate model
+# - training_mode="reflow" enables reflow loss calculation
+# - Teacher model is loaded at training time and set to policy.model.teacher
+# - Same SmolVLAPolicy class is used for both standard and reflow training
+#
+# Key Benefits:
+# - Conceptually clearer: Training method vs Model type
+# - Single Policy class: No SmolVLAReflowPolicy needed
+# - Easier to maintain: All reflow logic in modeling_smolvla.py
+# - Simpler configuration: Just set training_mode="reflow"
 
 set -e  # Exit on error
 
@@ -56,7 +62,7 @@ BATCH_SIZE=32
 STEPS=20000
 
 # Output
-OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow"
+OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow_new"
 
 # Hardware
 GPU_ID=2
@@ -78,9 +84,9 @@ mkdir -p /pfs/pfs-ilWc5D/ziqianwang/triton_cache
 # Validation
 # ============================================================================
 
-echo "=" | tr '=' '-' | head -c 80; echo
-echo "SmolVLA Reflow Training Configuration"
-echo "=" | tr '=' '-' | head -c 80; echo
+echo "================================================================================"
+echo "SmolVLA Reflow Training Configuration (New Architecture)"
+echo "================================================================================"
 
 # Check if teacher model exists
 if [ ! -d "$TEACHER_MODEL_PATH" ]; then
@@ -101,26 +107,31 @@ echo "✓ Output directory: $OUTPUT_DIR"
 echo "✓ GPU: $GPU_ID"
 echo "✓ Batch size: $BATCH_SIZE"
 echo "✓ Steps: $STEPS"
+echo "✓ Learning rate: $REFLOW_LR (smaller than standard 1e-4)"
 echo ""
 
 # ============================================================================
 # Training
 # ============================================================================
 
-echo "Starting Reflow training..."
+echo "Starting Reflow training with new architecture..."
 echo ""
-echo "New Reflow Structure:"
-echo "  - factory.py detects use_reflow=true → SmolVLAReflowPolicy"
-echo "  - VLM loaded ONCE (teacher first, student copies)"
-echo "  - VLM automatically frozen (no manual config needed)"
+echo "Key differences from old implementation:"
+echo "  - training_mode is runtime state (not in config)"
+echo "  - teacher_model_path is passed as argument"
+echo "  - Uses single SmolVLAPolicy class (no SmolVLAReflowPolicy)"
+echo "  - Both teacher AND student load from teacher_model_path"
+echo "  - Student initialized from teacher weights, then fine-tuned"
 echo ""
 
-CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train.py \
+# Use lerobot_train_reflow.py which sets up reflow training automatically
+# No need to specify training_mode - it's set by the training script
+CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train_reflow.py \
   --policy.type=smolvla \
   --policy.push_to_hub=false \
-  --policy.use_reflow=true \
   --policy.teacher_model_path="$TEACHER_MODEL_PATH" \
   --policy.freeze_vision_encoder=true \
+  --policy.train_expert_only=true \
   --policy.optimizer_lr="$REFLOW_LR" \
   --dataset.repo_id="$DATASET_REPO_ID" \
   --dataset.root="$DATASET_ROOT" \
@@ -132,14 +143,15 @@ CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train.py \
   --wandb.project="aloha_smolvla_reflow" \
   --wandb.entity="christianwang-sjtu" \
   --wandb.mode="online" \
-  --wandb.notes="Reflow training from checkpoint: $(basename $(dirname $TEACHER_MODEL_PATH))"
+  --wandb.notes="Reflow training (new architecture) from checkpoint: $(basename $(dirname $TEACHER_MODEL_PATH))"
 
 echo ""
-echo "=" | tr '=' '-' | head -c 80; echo
+echo "================================================================================"
 echo "Training completed! Model saved to: $OUTPUT_DIR"
-echo "=" | tr '=' '-' | head -c 80; echo
+echo "================================================================================"
 echo ""
 echo "Notes:"
-echo "  - VLM was loaded only ONCE (50% faster startup)"
+echo "  - Reflow is a training method, not a separate model"
 echo "  - Checkpoint is fully compatible with standard SmolVLAPolicy"
 echo "  - Load for inference: SmolVLAPolicy.from_pretrained('$OUTPUT_DIR/checkpoints/...')"
+echo "  - No special reflow config needed for inference"
