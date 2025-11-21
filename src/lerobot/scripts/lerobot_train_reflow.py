@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from lerobot_train import *  # noqa: F403, E402
 
 import torch
-from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy, pad_vector
 
 
 def setup_reflow_models(cfg, ds_meta):
@@ -125,7 +125,7 @@ def setup_reflow_models(cfg, ds_meta):
     return teacher, student
 
 
-def prepare_reflow_batch(teacher, batch):
+def prepare_reflow_batch(teacher, student, batch):
     """Prepare batch for reflow training by generating teacher targets.
 
     Key insight: Reflow uses the SAME time parameterization as standard FM.
@@ -145,35 +145,45 @@ def prepare_reflow_batch(teacher, batch):
     Solution:
         - X_1 = random noise (t=1)
         - X_0 = teacher.model.sample_actions(noise=X_1) (t=0, integrated from noise)
-        - Set actions=X_0, noise=X_1
-        - forward() computes: x_t = t*X_1 + (1-t)*X_0, u_t = X_1 - X_0
-        - This matches FM exactly, just with teacher-generated data!
+        - Preprocess observations ONCE (no duplicate prepare calls)
+        - Return everything ready for model.forward()
 
     Args:
         teacher: Frozen teacher policy
+        student: Student policy (for prepare methods)
         batch: Training batch with observations
 
     Returns:
-        tuple: (modified_batch, X_1_noise) - batch with actions=X_0, and X_1 to pass as noise
+        tuple: (images, img_masks, lang_tokens, lang_masks, state, X_0, X_1, actions_is_pad)
+            - All inputs preprocessed and ready for model.forward()
+            - X_0: teacher-generated actions (t=0)
+            - X_1: random noise (t=1)
+            - actions_is_pad: padding mask for loss computation
     """
     device = batch["observation.state"].device
     dtype = batch["action"].dtype
+
+    # Handle pi_aloha adaptation if needed (same as policy.forward)
+    if student.config.adapt_to_pi_aloha:
+        from lerobot.common.constants import OBS_STATE, ACTION
+        batch[OBS_STATE] = student._pi_aloha_decode_state(batch[OBS_STATE])
+        batch[ACTION] = student._pi_aloha_encode_actions_inv(batch[ACTION])
+
+    # Preprocess observations ONCE (shared by teacher and student)
+    images, img_masks = student.prepare_images(batch)
+    state = student.prepare_state(batch)
+    lang_tokens = batch["observation.environment_language_tokens"]
+    lang_masks = batch["observation.environment_language_attention_mask"]
+    actions_is_pad = batch.get("actions_is_pad")
 
     # Sample X_1 (random noise at t=1)
     action_shape = batch["action"].shape
     X_1 = torch.randn(action_shape, device=device, dtype=dtype)
 
     # Generate X_0 using teacher's ODE: integrate from t=1 (X_1) to t=0 (X_0)
-    # This is the same as standard inference: noise -> data
+    # Use the SAME preprocessed inputs (no duplicate preprocessing!)
     with torch.no_grad():
         teacher.eval()
-        # Prepare inputs for teacher model
-        images, img_masks = teacher.prepare_images(batch)
-        state = teacher.prepare_state(batch)
-        lang_tokens = batch["observation.environment_language_tokens"]
-        lang_masks = batch["observation.environment_language_attention_mask"]
-
-        # Call model.sample_actions directly (no queue management overhead)
         X_0 = teacher.model.sample_actions(
             images, img_masks, lang_tokens, lang_masks, state, noise=X_1
         )
@@ -182,12 +192,8 @@ def prepare_reflow_batch(teacher, batch):
         original_action_dim = teacher.config.action_feature.shape[0]
         X_0 = X_0[:, :, :original_action_dim]
 
-    # Modify batch: set actions to X_0 (teacher-generated data at t=0)
-    modified_batch = batch.copy()
-    modified_batch["action"] = X_0
-
-    # Return X_1 (noise at t=1) to be passed as "noise" parameter to forward()
-    return modified_batch, X_1
+    # Return preprocessed inputs and X_0, X_1
+    return images, img_masks, lang_tokens, lang_masks, state, X_0, X_1, actions_is_pad
 
 
 def main():
@@ -248,18 +254,35 @@ def main():
         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
         # === REFLOW CORE: Prepare reflow batch ===
-        # This cleverly reuses SmolVLA's forward() by passing teacher-generated data:
-        # 1. Sample X_1 (random noise at t=1)
-        # 2. Generate X_0 via teacher ODE (integrate from t=1 to t=0)
-        # 3. Set batch["action"] = X_0 (teacher-generated data)
-        # 4. Pass X_1 as noise to forward()
-        # Then forward() computes x_t = t*X_1 + (1-t)*X_0, u_t = X_1 - X_0 ✓
-        modified_batch, X_1_noise = prepare_reflow_batch(teacher, batch)
+        # Preprocess observations once and generate teacher actions:
+        # 1. Preprocess observations (images, state, etc.) - done ONCE
+        # 2. Sample X_1 (random noise at t=1)
+        # 3. Generate X_0 via teacher ODE (integrate from t=1 to t=0)
+        # 4. Return preprocessed inputs + X_0, X_1 for model.forward()
+        # This avoids duplicate preprocessing in prepare_images/prepare_state
+        images, img_masks, lang_tokens, lang_masks, state, X_0, X_1, actions_is_pad = prepare_reflow_batch(
+            teacher, policy, batch
+        )
 
-        # Forward with modified batch
-        # SmolVLA doesn't know this is reflow - it just computes its normal loss!
+        # Pad X_0 to max_action_dim for model.forward
+        X_0_padded = pad_vector(X_0, policy.config.max_action_dim)  # noqa: F405
+
+        # Forward pass directly on model (no duplicate preprocessing!)
         policy.train()
-        loss, output_dict = policy.forward(modified_batch, noise=X_1_noise)
+        losses = policy.model.forward(
+            images, img_masks, lang_tokens, lang_masks, state, X_0_padded, noise=X_1, time=None
+        )
+
+        # Apply action padding mask (same as policy.forward)
+        if actions_is_pad is not None:
+            in_episode_bound = ~actions_is_pad
+            losses = losses * in_episode_bound.unsqueeze(-1)
+
+        # Remove padding dimension (same as policy.forward)
+        losses = losses[:, :, : policy.config.action_feature.shape[0]]
+
+        # Compute scalar loss
+        loss = losses.mean()
 
         # Backward and optimize
         optimizer.zero_grad()
