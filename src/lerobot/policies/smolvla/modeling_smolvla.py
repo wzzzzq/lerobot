@@ -511,10 +511,6 @@ class VLAFlowMatching(nn.Module):
         self.image_end_token = torch.tensor([self.fake_image_token], dtype=torch.long)
         self.prefix_length = self.config.prefix_length
 
-        # Reflow training support (runtime state, not config)
-        self.teacher = None  # Set by training script when using reflow
-        self.training_mode = "standard"  # "standard" or "reflow", set by training script
-
     def set_requires_grad(self):
         for params in self.state_proj.parameters():
             params.requires_grad = self.config.train_state_proj
@@ -675,21 +671,7 @@ class VLAFlowMatching(nn.Module):
     def forward(
         self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
     ) -> Tensor:
-        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)
-
-        The loss computation depends on self.training_mode:
-        - "standard": Standard Flow Matching loss
-        - "reflow": Reflow (Rectified Flow) loss with teacher model
-        """
-        if self.training_mode == "reflow" and self.training:
-            return self.forward_reflow(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
-        else:
-            return self.forward_standard(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
-
-    def forward_standard(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
-    ) -> Tensor:
-        """Standard Flow Matching training loss."""
+        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -799,141 +781,3 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         return v_t
-
-    @torch.no_grad()
-    def generate_reflow_target(self, images, img_masks, lang_tokens, lang_masks, state, noise):
-        """Generate X_1 from teacher model using ODE solver (Euler method).
-
-        This implements the data pair generation step in Reflow (Algorithm 1):
-        X_0 ~ N(0, 1) (noise)
-        X_1 = ODE[v_k](X_0 | T) = X_0 + ∫_0^1 v_k(X_t, t | T) dt
-
-        Args:
-            images, img_masks, lang_tokens, lang_masks, state: Input observations
-            noise: X_0, sampled from N(0, 1)
-
-        Returns:
-            X_1: Generated actions from teacher model via ODE integration
-        """
-        if self.teacher is None:
-            raise ValueError("Teacher model is not set. Cannot use reflow training without a teacher model.")
-
-        bsize = noise.shape[0]
-        device = noise.device
-
-        # Get prefix embeddings and cache (shared across denoising steps)
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.teacher.model.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
-
-        # Create position_ids and attention_mask from prefix masks
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-
-        _, past_key_values = self.teacher.model.vlm_with_expert.forward(
-            attention_mask=prefix_att_2d_masks,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=prefix_embs,
-            use_cache=True,
-            fill_kv_cache=True,
-        )
-
-        # ODE integration using Euler method
-        num_steps = self.config.num_steps
-        dt = 1.0 / num_steps
-        x_t = noise  # Start from X_0 = noise
-
-        for step in range(num_steps):
-            t = step * dt
-            time = torch.full((bsize,), t, device=device, dtype=torch.float32)
-
-            # Compute v_k(X_t, t | T) using teacher model
-            suffix_embs, suffix_pad_masks, suffix_att_masks = self.teacher.model.embed_suffix(x_t, time)
-            pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-            att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-            att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-            position_ids = torch.cumsum(pad_masks, dim=1) - 1
-
-            (_, suffix_out), _ = self.teacher.model.vlm_with_expert.forward(
-                attention_mask=att_2d_masks,
-                position_ids=position_ids,
-                past_key_values=past_key_values,
-                inputs_embeds=[None, suffix_embs],
-                use_cache=False,
-                fill_kv_cache=False,
-            )
-
-            v_t = self.teacher.model.action_out_proj(suffix_out)
-
-            # Euler step: X_{t+dt} = X_t + dt * v_t
-            x_t = x_t + dt * v_t
-
-        return x_t  # X_1
-
-    def forward_reflow(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
-    ) -> Tensor:
-        """Reflow training forward pass (Rectified Flow).
-
-        Implements Equation 5 from Reflow paper:
-        L_reflow = E[ ∫ ||(X_1 - X_0) - v_{k+1}(X_t, t)||^2 dt ]
-
-        Where:
-        - X_0 ~ N(0, 1): noise
-        - X_1 = ODE[v_k](X_0|T): generated by teacher model v_k
-        - X_t = (1-t)*X_0 + t*X_1: linear interpolation
-        - (X_1 - X_0): straight-line velocity (target)
-        - v_{k+1}: student model (being trained)
-
-        The key difference from standard Flow Matching:
-        - Standard FM: u_t = noise - actions (curved trajectory)
-        - Reflow: u_t = X_1 - X_0 (straightened trajectory)
-        """
-        if noise is None:
-            noise = self.sample_noise(actions.shape, actions.device)  # X_0
-
-        # Generate X_1 using teacher model via ODE
-        X_1 = self.generate_reflow_target(images, img_masks, lang_tokens, lang_masks, state, noise)
-        X_0 = noise
-
-        # Sample timestep
-        if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
-
-        # Linear interpolation: X_t = (1-t)*X_0 + t*X_1
-        time_expanded = time[:, None, None]
-        X_t = (1 - time_expanded) * X_0 + time_expanded * X_1
-
-        # Target: straight-line velocity from X_0 to X_1
-        u_t = X_1 - X_0
-
-        # Compute student model prediction v_{k+1}(X_t, t)
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state=state
-        )
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(X_t, time)
-
-        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-
-        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-        position_ids = torch.cumsum(pad_masks, dim=1) - 1
-
-        (_, suffix_out), _ = self.vlm_with_expert.forward(
-            attention_mask=att_2d_masks,
-            position_ids=position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, suffix_embs],
-            use_cache=False,
-            fill_kv_cache=False,
-        )
-
-        suffix_out = suffix_out[:, -self.config.chunk_size :]
-        suffix_out = suffix_out.to(dtype=torch.float32)
-        v_t_pred = self.action_out_proj(suffix_out)
-
-        # Reflow loss: ||u_t - v_t_pred||^2
-        losses = (u_t - v_t_pred) ** 2
-
-        return losses
