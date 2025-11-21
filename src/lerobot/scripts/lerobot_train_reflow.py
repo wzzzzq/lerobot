@@ -196,10 +196,9 @@ def prepare_reflow_batch(teacher, student, batch):
     return images, img_masks, lang_tokens, lang_masks, state, X_0, X_1, actions_is_pad
 
 
-def main():
+@parser.wrap()  # noqa: F405
+def main(cfg):  # noqa: F405
     """Main training function with reflow support."""
-    # Parse config
-    cfg = parser.parse_args_to_cfg()  # noqa: F405
     init_logging()  # noqa: F405
 
     # Log config
