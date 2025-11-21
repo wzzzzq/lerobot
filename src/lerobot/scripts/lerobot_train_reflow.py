@@ -144,7 +144,7 @@ def prepare_reflow_batch(teacher, batch):
 
     Solution:
         - X_1 = random noise (t=1)
-        - X_0 = teacher.sample_actions(X_1) (t=0, integrated from noise)
+        - X_0 = teacher.model.sample_actions(noise=X_1) (t=0, integrated from noise)
         - Set actions=X_0, noise=X_1
         - forward() computes: x_t = t*X_1 + (1-t)*X_0, u_t = X_1 - X_0
         - This matches FM exactly, just with teacher-generated data!
@@ -167,7 +167,20 @@ def prepare_reflow_batch(teacher, batch):
     # This is the same as standard inference: noise -> data
     with torch.no_grad():
         teacher.eval()
-        X_0 = teacher.select_action(batch, noise=X_1)
+        # Prepare inputs for teacher model
+        images, img_masks = teacher.prepare_images(batch)
+        state = teacher.prepare_state(batch)
+        lang_tokens = batch["observation.environment_language_tokens"]
+        lang_masks = batch["observation.environment_language_attention_mask"]
+
+        # Call model.sample_actions directly (no queue management overhead)
+        X_0 = teacher.model.sample_actions(
+            images, img_masks, lang_tokens, lang_masks, state, noise=X_1
+        )
+
+        # Unpad actions to match original action dimension
+        original_action_dim = teacher.config.action_feature.shape[0]
+        X_0 = X_0[:, :, :original_action_dim]
 
     # Modify batch: set actions to X_0 (teacher-generated data at t=0)
     modified_batch = batch.copy()
@@ -239,10 +252,10 @@ def main():
         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
         # === REFLOW CORE: Prepare reflow batch ===
-        # This cleverly reuses SmolVLA's forward() by swapping actions and noise:
-        # 1. Sample X_0 (noise)
-        # 2. Generate X_1 via teacher ODE
-        # 3. Set batch["action"] = X_0
+        # This cleverly reuses SmolVLA's forward() by passing teacher-generated data:
+        # 1. Sample X_1 (random noise at t=1)
+        # 2. Generate X_0 via teacher ODE (integrate from t=1 to t=0)
+        # 3. Set batch["action"] = X_0 (teacher-generated data)
         # 4. Pass X_1 as noise to forward()
         # Then forward() computes x_t = t*X_1 + (1-t)*X_0, u_t = X_1 - X_0 ✓
         modified_batch, X_1_noise = prepare_reflow_batch(teacher, batch)
