@@ -249,9 +249,8 @@ def main():
         # Get next batch
         batch = next(data_iter)
 
-        # Preprocess batch
+        # Preprocess batch (includes device transfer via DeviceProcessorStep)
         batch = pre_processor(batch)
-        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
         # === REFLOW CORE: Prepare reflow batch ===
         # Preprocess observations once and generate teacher actions:
