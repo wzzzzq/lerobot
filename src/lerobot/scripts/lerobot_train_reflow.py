@@ -227,7 +227,7 @@ def main():
     logging.info("Starting reflow training loop...")
 
     step = 0
-    data_iter = iter(train_dataloader)
+    data_iter = cycle(train_dataloader)  # noqa: F405
 
     # Move models to device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -241,11 +241,7 @@ def main():
 
     while step < cfg.steps:
         # Get next batch
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            data_iter = iter(train_dataloader)
-            batch = next(data_iter)
+        batch = next(data_iter)
 
         # Preprocess batch
         batch = pre_processor(batch)
