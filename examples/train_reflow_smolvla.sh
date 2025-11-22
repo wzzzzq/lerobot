@@ -57,11 +57,11 @@ TEACHER_MODEL_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/
 # - Reflow training: 1e-5 to 5e-5 (fine-tuning from teacher)
 # - Reflow is "straightening" trajectories, not learning from scratch
 # - Lower LR prevents disrupting already-learned features
-REFLOW_LR="2e-5"  # 5x smaller than normal training
+REFLOW_LR="1e-5"  # 5x smaller than normal training
 
 # Training configuration
 BATCH_SIZE=32
-STEPS=20000
+STEPS=10000
 
 # Output
 OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow_new"
@@ -137,7 +137,7 @@ echo ""
 CUDA_VISIBLE_DEVICES=$GPU_ID python src/lerobot/scripts/lerobot_train_reflow.py \
   --policy.type=smolvla \
   --policy.push_to_hub=false \
-  --policy.teacher_model_path="$TEACHER_MODEL_PATH" \
+  --teacher_model_path="$TEACHER_MODEL_PATH" \
   --policy.optimizer_lr="$REFLOW_LR" \
   --dataset.repo_id="$DATASET_REPO_ID" \
   --dataset.root="$DATASET_ROOT" \

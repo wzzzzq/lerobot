@@ -46,6 +46,8 @@ Usage:
 import logging
 import sys
 import os
+from dataclasses import dataclass
+from pathlib import Path
 
 # Add the scripts directory to the path so we can import from lerobot_train
 sys.path.insert(0, os.path.dirname(__file__))
@@ -53,6 +55,35 @@ from lerobot_train import *  # noqa: F403, E402
 
 import torch
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy, pad_vector
+from lerobot.configs.train import TrainPipelineConfig
+
+
+@dataclass
+class ReflowTrainPipelineConfig(TrainPipelineConfig):
+    """Extended training configuration for Reflow training.
+    
+    Adds teacher_model_path as a top-level argument, keeping it separate
+    from policy configuration for clean architecture.
+    """
+    # Path to the pretrained teacher model checkpoint
+    teacher_model_path: Path | None = None
+
+    def validate(self) -> None:
+        """Validate config and set up optimizer/scheduler from policy presets."""
+        # Call parent validation to set up optimizer/scheduler from presets
+        super().validate()
+        
+        # Validate teacher_model_path for reflow training
+        if self.teacher_model_path is None:
+            raise ValueError(
+                "teacher_model_path is required for reflow training. "
+                "Please specify --teacher_model_path=/path/to/teacher/checkpoint"
+            )
+        
+        if not Path(self.teacher_model_path).exists():
+            raise FileNotFoundError(
+                f"Teacher model path does not exist: {self.teacher_model_path}"
+            )
 
 
 def setup_reflow_models(cfg, ds_meta):
@@ -65,7 +96,7 @@ def setup_reflow_models(cfg, ds_meta):
     This function loads BOTH models and freezes the appropriate components.
 
     Args:
-        cfg: Training configuration
+        cfg: ReflowTrainPipelineConfig with teacher_model_path
         ds_meta: Dataset metadata
 
     Returns:
@@ -76,17 +107,16 @@ def setup_reflow_models(cfg, ds_meta):
     if cfg.policy.type != "smolvla":
         raise ValueError("Reflow training is only supported for smolvla policy")
 
-    teacher_path = getattr(cfg.policy, "teacher_model_path", None)
-    if not teacher_path:
+    if not cfg.teacher_model_path:
         raise ValueError(
             "teacher_model_path must be specified for reflow training. "
-            "Use --policy.teacher_model_path=/path/to/teacher"
+            "Use --teacher_model_path=/path/to/teacher"
         )
 
-    logging.info(f"[Reflow] Loading teacher model from {teacher_path}")
+    logging.info(f"[Reflow] Loading teacher model from {cfg.teacher_model_path}")
 
     # Load teacher model (will be frozen for generating X_1)
-    teacher = SmolVLAPolicy.from_pretrained(teacher_path)
+    teacher = SmolVLAPolicy.from_pretrained(cfg.teacher_model_path)
     teacher.eval()
 
     # Freeze ALL teacher parameters
@@ -97,8 +127,8 @@ def setup_reflow_models(cfg, ds_meta):
 
     # Initialize student from the same checkpoint
     # This is key for reflow: student starts with teacher's weights
-    logging.info(f"[Reflow] Initializing student model from {teacher_path}")
-    student = SmolVLAPolicy.from_pretrained(teacher_path)
+    logging.info(f"[Reflow] Initializing student model from {cfg.teacher_model_path}")
+    student = SmolVLAPolicy.from_pretrained(cfg.teacher_model_path)
 
     # Freeze VLM and vision encoder in student
     # Reflow only fine-tunes the expert (action head)
@@ -160,32 +190,37 @@ def prepare_reflow_batch(teacher, student, batch):
             - X_1: random noise (t=1)
             - actions_is_pad: padding mask for loss computation
     """
+    from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK, OBS_STATE, ACTION
+    
     device = batch["observation.state"].device
     dtype = batch["action"].dtype
 
     # Handle pi_aloha adaptation if needed (same as policy.forward)
     if student.config.adapt_to_pi_aloha:
-        from lerobot.common.constants import OBS_STATE, ACTION
         batch[OBS_STATE] = student._pi_aloha_decode_state(batch[OBS_STATE])
         batch[ACTION] = student._pi_aloha_encode_actions_inv(batch[ACTION])
 
     # Preprocess observations ONCE (shared by teacher and student)
     images, img_masks = student.prepare_images(batch)
     state = student.prepare_state(batch)
-    lang_tokens = batch["observation.environment_language_tokens"]
-    lang_masks = batch["observation.environment_language_attention_mask"]
+    lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+    lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
     actions_is_pad = batch.get("actions_is_pad")
 
     # Sample X_1 (random noise at t=1)
     action_shape = batch["action"].shape
     X_1 = torch.randn(action_shape, device=device, dtype=dtype)
 
+    # Pad X_1 to max_action_dim for teacher model
+    # The teacher's action_in_proj expects padded actions
+    X_1_padded = pad_vector(X_1, teacher.config.max_action_dim)
+
     # Generate X_0 using teacher's ODE: integrate from t=1 (X_1) to t=0 (X_0)
     # Use the SAME preprocessed inputs (no duplicate preprocessing!)
     with torch.no_grad():
         teacher.eval()
         X_0 = teacher.model.sample_actions(
-            images, img_masks, lang_tokens, lang_masks, state, noise=X_1
+            images, img_masks, lang_tokens, lang_masks, state, noise=X_1_padded
         )
 
         # Unpad actions to match original action dimension
@@ -197,8 +232,11 @@ def prepare_reflow_batch(teacher, student, batch):
 
 
 @parser.wrap()  # noqa: F405
-def main(cfg):  # noqa: F405
+def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
     """Main training function with reflow support."""
+    # Validate config and set up optimizer/scheduler from presets
+    cfg.validate()
+    
     init_logging()  # noqa: F405
 
     # Log config
@@ -206,12 +244,12 @@ def main(cfg):  # noqa: F405
 
     # Make dataset
     logging.info("Making dataset...")
-    ds_meta, train_dataloader = make_dataset(cfg)  # noqa: F405
+    dataset = make_dataset(cfg)  # noqa: F405
 
     # Setup teacher and student models
     # NOTE: Both load from teacher_model_path - student starts from teacher's weights
     logging.info("Setting up teacher and student models...")
-    teacher, student = setup_reflow_models(cfg, ds_meta)
+    teacher, student = setup_reflow_models(cfg, dataset.meta)
 
     # Use student as the policy to train
     policy = student
@@ -219,23 +257,41 @@ def main(cfg):  # noqa: F405
 
     # Make optimizer and scheduler
     logging.info("Making optimizer and scheduler...")
-    optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg.policy, policy)  # noqa: F405
+    optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)  # noqa: F405
 
-    # Make environment (optional)
-    env = None
-    eval_batch_size = None
-    if cfg.evaluate.enabled and cfg.evaluate.on_real_robot:
-        logging.info("Making environment...")
-        env, eval_batch_size = make_env_eval_online(cfg)  # noqa: F405
+    # Create dataloader
+    logging.info("Creating dataloader...")
+    if hasattr(cfg.policy, "drop_n_last_frames"):
+        shuffle = False
+        sampler = EpisodeAwareSampler(  # noqa: F405
+            dataset.meta.episodes["dataset_from_index"],
+            dataset.meta.episodes["dataset_to_index"],
+            drop_n_last_frames=cfg.policy.drop_n_last_frames,
+            shuffle=True,
+        )
+    else:
+        shuffle = True
+        sampler = None
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=cfg.num_workers,
+        batch_size=cfg.batch_size,
+        shuffle=shuffle and not cfg.dataset.streaming,
+        sampler=sampler,
+        pin_memory=device.type == "cuda",
+        drop_last=False,
+        prefetch_factor=2 if cfg.num_workers > 0 else None,
+    )
 
     # Custom training loop for reflow
     logging.info("Starting reflow training loop...")
 
     step = 0
-    data_iter = cycle(train_dataloader)  # noqa: F405
+    data_iter = cycle(dataloader)  # noqa: F405
 
     # Move models to device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     teacher = teacher.to(device)
     policy = policy.to(device)
 
@@ -262,13 +318,15 @@ def main(cfg):  # noqa: F405
             teacher, policy, batch
         )
 
-        # Pad X_0 to max_action_dim for model.forward
+        # Pad X_0 and X_1 to max_action_dim for model.forward
+        # Both need to be padded since they're used in interpolation: x_t = t*noise + (1-t)*actions
         X_0_padded = pad_vector(X_0, policy.config.max_action_dim)  # noqa: F405
+        X_1_padded = pad_vector(X_1, policy.config.max_action_dim)  # noqa: F405
 
         # Forward pass directly on model (no duplicate preprocessing!)
         policy.train()
         losses = policy.model.forward(
-            images, img_masks, lang_tokens, lang_masks, state, X_0_padded, noise=X_1, time=None
+            images, img_masks, lang_tokens, lang_masks, state, X_0_padded, noise=X_1_padded, time=None
         )
 
         # Apply action padding mask (same as policy.forward)
@@ -320,18 +378,8 @@ def main(cfg):  # noqa: F405
             logging.info(f"✓ Checkpoint saved to {save_path}")
 
         # Evaluation (if enabled)
-        if cfg.evaluate.enabled and step % cfg.evaluate.freq == 0:
-            logging.info(f"Running evaluation at step {step}...")
-            if env is not None:
-                # Online evaluation on real robot
-                eval_info = evaluate_on_env(  # noqa: F405
-                    env,
-                    policy,
-                    cfg.evaluate.num_episodes,
-                    eval_batch_size,
-                    device,
-                )
-                logging.info(f"Evaluation results: {eval_info}")
+        if cfg.eval_freq > 0 and step % cfg.eval_freq == 0 and cfg.env is not None:
+            logging.info(f"Evaluation at step {step} (skipped - evaluation not implemented in reflow script)")
 
     logging.info("=" * 80)
     logging.info("Reflow Training Completed!")
