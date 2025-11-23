@@ -10,10 +10,10 @@ Reflow推理问题诊断脚本
 5. 配置参数验证
 
 运行方法：
-    python diagnose_reflow_inference.py \\
-        --teacher_path /path/to/teacher/checkpoint \\
-        --student_path /path/to/student/checkpoint \\
-        --dataset_repo_id your_dataset_repo_id \\
+    python diagnose_reflow_inference.py \
+        --teacher_path /pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/checkpoints/last/pretrained_model \
+        --student_path /pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow_new/checkpoints/last/pretrained_model \
+        --dataset_repo_id /pfs/pfs-ilWc5D/ziqianwang/lerobot_datasets/name/aloha_agilex_sim/put_bottles_dustbin_v30 \
         --num_samples 5
 """
 
@@ -106,6 +106,8 @@ def check_config_consistency(teacher: SmolVLAPolicy, student: SmolVLAPolicy):
 
 def prepare_test_batch(dataset: LeRobotDataset, policy: SmolVLAPolicy, device: str):
     """准备测试batch"""
+    from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK
+    
     # 获取一个样本
     sample = dataset[0]
 
@@ -119,24 +121,29 @@ def prepare_test_batch(dataset: LeRobotDataset, policy: SmolVLAPolicy, device: s
 
     # 如果需要pi_aloha适配
     if policy.config.adapt_to_pi_aloha:
-        batch["observation.state"] = policy._pi_aloha_decode_state(batch["observation.state"])
+        from lerobot.utils.constants import OBS_STATE
+        batch[OBS_STATE] = policy._pi_aloha_decode_state(batch[OBS_STATE])
 
     # 预处理
     images, img_masks = policy.prepare_images(batch)
     state = policy.prepare_state(batch)
 
     # 假设语言tokens已经在batch中（如果没有需要添加）
-    if "observation.language_tokens" not in batch:
+    if f"{OBS_LANGUAGE_TOKENS}" not in batch:
         # 创建dummy language tokens
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(policy.config.vlm_model_name)
         text = "test task"
-        tokens = tokenizer(text, return_tensors="pt", padding=True)
-        batch["observation.language_tokens"] = tokens["input_ids"].to(device)
-        batch["observation.language_attention_mask"] = tokens["attention_mask"].to(device)
+        tokens = tokenizer(text, return_tensors="pt", padding=True, max_length=48)
+        batch[f"{OBS_LANGUAGE_TOKENS}"] = tokens["input_ids"].to(device)
+        batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"] = tokens["attention_mask"].to(device)
 
-    lang_tokens = batch["observation.language_tokens"]
-    lang_masks = batch["observation.language_attention_mask"]
+    lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+    lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+    
+    # Ensure lang_masks is boolean type (required by model)
+    if lang_masks.dtype != torch.bool:
+        lang_masks = lang_masks.bool()
 
     return images, img_masks, lang_tokens, lang_masks, state, batch
 
