@@ -49,14 +49,42 @@ print('\n' + '=' * 80)
 print('COMPARING TEACHER vs STUDENT ACTIONS')
 print('=' * 80)
 
-# Prepare inputs (use student's prepare - already verified identical to teacher)
-images, img_masks = student.prepare_images(batch)
-state = student.prepare_state(batch)
+print("\n📊 Batch keys:")
+for key in sorted(batch.keys()):
+    if isinstance(batch[key], torch.Tensor):
+        print(f"  {key}: {batch[key].shape}")
 
-# Tokenize task if needed
+# Generate actions using SAME noise for both models
+print("\n🎲 Creating shared random noise...")
+action_dim = teacher.config.action_feature.shape[0]
+max_action_dim = teacher.config.max_action_dim
+n_action_steps = teacher.config.n_action_steps
+
+# Sample noise at action_dim (14)
+X_1 = torch.randn(1, n_action_steps, action_dim, device=device, dtype=torch.float32)
+
+# Pad to max_action_dim (32) for model input
+from lerobot.policies.smolvla.modeling_smolvla import pad_vector
+X_1_padded = pad_vector(X_1, max_action_dim)
+
+print(f"  Noise shape: {X_1_padded.shape}")
+print(f"  Noise stats: mean={X_1_padded.mean():.4f}, std={X_1_padded.std():.4f}")
+
+# ============================================================================
+# TEACHER: Completely independent processing
+# ============================================================================
+print("\n" + "=" * 80)
+print("🔵 TEACHER PROCESSING (completely independent)")
+print("=" * 80)
+
+# Teacher: prepare inputs independently
+teacher_images, teacher_img_masks = teacher.prepare_images(batch)
+teacher_state = teacher.prepare_state(batch)
+
+# Teacher: tokenize language independently
 if OBS_LANGUAGE_TOKENS in batch:
-    lang_tokens = batch[OBS_LANGUAGE_TOKENS]
-    lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
+    teacher_lang_tokens = batch[OBS_LANGUAGE_TOKENS]
+    teacher_lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
 else:
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
@@ -70,54 +98,75 @@ else:
         max_length=teacher.config.tokenizer_max_length,
         truncation=True
     )
-    lang_tokens = tokens["input_ids"].to(device)
-    lang_masks = tokens["attention_mask"].to(device).bool()
+    teacher_lang_tokens = tokens["input_ids"].to(device)
+    teacher_lang_masks = tokens["attention_mask"].to(device).bool()
 
-print("\n📊 Input shapes:")
-print(f"  Images: {len(images)} cameras, shape={images[0].shape}")
-print(f"  State: {state.shape}")
-print(f"  Language tokens: {lang_tokens.shape}")
+print(f"  Images: {len(teacher_images)} cameras, shape={teacher_images[0].shape}")
+print(f"  State: {teacher_state.shape}, mean={teacher_state.mean():.4f}")
+print(f"  Language tokens: {teacher_lang_tokens.shape}")
 
-# Generate actions using SAME noise for both models
-print("\n🎲 Using same random noise for both models...")
-action_dim = teacher.config.action_feature.shape[0]
-max_action_dim = teacher.config.max_action_dim
-n_action_steps = teacher.config.n_action_steps
-
-# Sample noise at action_dim (14)
-X_1 = torch.randn(1, n_action_steps, action_dim, device=device, dtype=torch.float32)
-
-# Pad to max_action_dim (32) for model input
-from lerobot.policies.smolvla.modeling_smolvla import pad_vector
-X_1_padded = pad_vector(X_1, max_action_dim)
-
-print(f"  Noise shape: {X_1_padded.shape}")
-
-# Generate actions with teacher
-print("\n🔵 Teacher generating actions...")
+# Teacher: generate actions
+print("\n  Generating actions...")
 with torch.no_grad():
     teacher_actions_full = teacher.model.sample_actions(
-        images, img_masks, lang_tokens, lang_masks, state, noise=X_1_padded
+        teacher_images, teacher_img_masks, teacher_lang_tokens, teacher_lang_masks,
+        teacher_state, noise=X_1_padded.clone()  # Clone noise to be safe
     )
     # Unpad to original action_dim (as done in inference)
     teacher_actions = teacher_actions_full[:, :, :action_dim]
 
-print(f"  Teacher actions shape: {teacher_actions.shape}")
-print(f"  Teacher actions range: [{teacher_actions.min():.4f}, {teacher_actions.max():.4f}]")
-print(f"  Teacher actions mean: {teacher_actions.mean():.4f}, std: {teacher_actions.std():.4f}")
+print(f"  Actions shape: {teacher_actions.shape}")
+print(f"  Actions range: [{teacher_actions.min():.4f}, {teacher_actions.max():.4f}]")
+print(f"  Actions mean: {teacher_actions.mean():.4f}, std: {teacher_actions.std():.4f}")
 
-# Generate actions with student
-print("\n🟢 Student generating actions...")
+# ============================================================================
+# STUDENT: Completely independent processing
+# ============================================================================
+print("\n" + "=" * 80)
+print("🟢 STUDENT PROCESSING (completely independent)")
+print("=" * 80)
+
+# Student: prepare inputs independently
+student_images, student_img_masks = student.prepare_images(batch)
+student_state = student.prepare_state(batch)
+
+# Student: tokenize language independently
+if OBS_LANGUAGE_TOKENS in batch:
+    student_lang_tokens = batch[OBS_LANGUAGE_TOKENS]
+    student_lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
+else:
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(student.config.vlm_model_name)
+    task = batch["task"]
+    task_texts = [task] if isinstance(task, str) else task
+    task_texts = [t if t.endswith("\n") else f"{t}\n" for t in task_texts]
+    tokens = tokenizer(
+        task_texts,
+        return_tensors="pt",
+        padding="max_length",
+        max_length=student.config.tokenizer_max_length,
+        truncation=True
+    )
+    student_lang_tokens = tokens["input_ids"].to(device)
+    student_lang_masks = tokens["attention_mask"].to(device).bool()
+
+print(f"  Images: {len(student_images)} cameras, shape={student_images[0].shape}")
+print(f"  State: {student_state.shape}, mean={student_state.mean():.4f}")
+print(f"  Language tokens: {student_lang_tokens.shape}")
+
+# Student: generate actions
+print("\n  Generating actions...")
 with torch.no_grad():
     student_actions_full = student.model.sample_actions(
-        images, img_masks, lang_tokens, lang_masks, state, noise=X_1_padded
+        student_images, student_img_masks, student_lang_tokens, student_lang_masks,
+        student_state, noise=X_1_padded.clone()  # Clone noise to be safe
     )
     # Unpad to original action_dim
     student_actions = student_actions_full[:, :, :action_dim]
 
-print(f"  Student actions shape: {student_actions.shape}")
-print(f"  Student actions range: [{student_actions.min():.4f}, {student_actions.max():.4f}]")
-print(f"  Student actions mean: {student_actions.mean():.4f}, std: {student_actions.std():.4f}")
+print(f"  Actions shape: {student_actions.shape}")
+print(f"  Actions range: [{student_actions.min():.4f}, {student_actions.max():.4f}]")
+print(f"  Actions mean: {student_actions.mean():.4f}, std: {student_actions.std():.4f}")
 
 # Compare actions
 print("\n🔍 COMPARISON:")
