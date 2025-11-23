@@ -95,10 +95,14 @@ def test_student_velocity_quality(
         images, img_masks = teacher.prepare_images(batch)
         state = teacher.prepare_state(batch)
 
-        # Try to get language tokens from batch, fallback to default if not present
+        # Debug: Print batch keys
         from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK
+        print(f"\nBatch keys: {list(batch.keys())}")
+        print(f"Looking for: '{OBS_LANGUAGE_TOKENS}'")
+        print(f"Key in batch: {OBS_LANGUAGE_TOKENS in batch}")
 
-        if f"{OBS_LANGUAGE_TOKENS}" in batch:
+        # Try to get language tokens from batch, fallback to default if not present
+        if OBS_LANGUAGE_TOKENS in batch:
             lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
             lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
             print(f"  Images: {len(images)} cameras")
