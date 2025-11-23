@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy, pad_vector
 from lerobot.datasets.factory import make_dataset
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.configs.dataset import DatasetConfig
+from lerobot.configs.default import DatasetConfig
 
 
 def test_student_velocity_quality(
