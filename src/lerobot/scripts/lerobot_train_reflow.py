@@ -222,12 +222,13 @@ def prepare_reflow_batch(teacher, student, batch):
         X_0 = teacher.model.sample_actions(
             images, img_masks, lang_tokens, lang_masks, state, noise=X_1_padded
         )
-
-        # Unpad actions to match original action dimension
-        original_action_dim = teacher.config.action_feature.shape[0]
-        X_0 = X_0[:, :, :original_action_dim]
+        # CRITICAL FIX: Do NOT unpad X_0!
+        # Teacher's X_0 may have non-zero values in padding dimensions due to ODE integration.
+        # Unpading would lose this information and create train/inference mismatch.
+        # Keep X_0 at full max_action_dim (32) to preserve teacher's actual output.
 
     # Return preprocessed inputs and X_0, X_1
+    # NOTE: X_0 is now max_action_dim (32), not original action_dim (14)
     return images, img_masks, lang_tokens, lang_masks, state, X_0, X_1, actions_is_pad
 
 
@@ -318,15 +319,16 @@ def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
             teacher, policy, batch
         )
 
-        # Pad X_0 and X_1 to max_action_dim for model.forward
-        # Both need to be padded since they're used in interpolation: x_t = t*noise + (1-t)*actions
-        X_0_padded = pad_vector(X_0, policy.config.max_action_dim)  # noqa: F405
+        # CRITICAL FIX: X_0 is already at max_action_dim (32) from teacher.sample_actions()
+        # Do NOT pad again! This would create a double-pad bug.
+        # Only pad X_1 since it's sampled at original action_dim (14)
         X_1_padded = pad_vector(X_1, policy.config.max_action_dim)  # noqa: F405
 
         # Forward pass directly on model (no duplicate preprocessing!)
+        # X_0 is used directly (already 32-dim), X_1_padded is padded to 32-dim
         policy.train()
         losses = policy.model.forward(
-            images, img_masks, lang_tokens, lang_masks, state, X_0_padded, noise=X_1_padded, time=None
+            images, img_masks, lang_tokens, lang_masks, state, X_0, noise=X_1_padded, time=None
         )
 
         # Apply action padding mask (same as policy.forward)
