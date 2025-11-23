@@ -373,9 +373,19 @@ def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
         # Save checkpoint
         if step % cfg.save_freq == 0 or step == cfg.steps:
             logging.info(f"Saving checkpoint at step {step}...")
-            save_path = os.path.join(cfg.output_dir, f"checkpoint_{step}")
-            policy.save_pretrained(save_path)
-            logging.info(f"✓ Checkpoint saved to {save_path}")
+            checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)  # noqa: F405
+            save_checkpoint(  # noqa: F405
+                checkpoint_dir=checkpoint_dir,
+                step=step,
+                cfg=cfg,
+                policy=policy,
+                optimizer=optimizer,
+                scheduler=lr_scheduler,
+                preprocessor=pre_processor,
+                postprocessor=post_processor,
+            )
+            update_last_checkpoint(checkpoint_dir)  # noqa: F405
+            logging.info(f"✓ Checkpoint saved to {checkpoint_dir}")
 
         # Evaluation (if enabled)
         if cfg.eval_freq > 0 and step % cfg.eval_freq == 0 and cfg.env is not None:

@@ -57,11 +57,11 @@ TEACHER_MODEL_PATH="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin/
 # - Reflow training: 1e-5 to 5e-5 (fine-tuning from teacher)
 # - Reflow is "straightening" trajectories, not learning from scratch
 # - Lower LR prevents disrupting already-learned features
-REFLOW_LR="1e-5"  # 5x smaller than normal training
+REFLOW_LR="1e-7"  # 5x smaller than normal training
 
 # Training configuration
 BATCH_SIZE=32
-STEPS=10000
+STEPS=100000
 
 # Output
 OUTPUT_DIR="/pfs/pfs-ilWc5D/ziqianwang/new_pretrain/put_bottles_dustbin_reflow_new"
