@@ -56,6 +56,7 @@ from lerobot_train import *  # noqa: F403, E402
 import torch
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy, pad_vector
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.rl.wandb_utils import WandBLogger
 
 
 @dataclass
@@ -296,6 +297,14 @@ def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
     teacher = teacher.to(device)
     policy = policy.to(device)
 
+    # Initialize wandb logger
+    if cfg.wandb.enable and cfg.wandb.project:
+        wandb_logger = WandBLogger(cfg)
+        logging.info("✓ WandB logging enabled")
+    else:
+        wandb_logger = None
+        logging.info("WandB logging disabled")
+
     logging.info(f"Using device: {device}")
     logging.info("=" * 80)
     logging.info("Starting Reflow Training")
@@ -365,12 +374,37 @@ def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
 
         # Logging
         if cfg.log_freq > 0 and step % cfg.log_freq == 0:
+            current_lr = optimizer.param_groups[0]['lr']
             logging.info(
                 f"Step {step}/{cfg.steps} | "
                 f"Loss: {loss.item():.4f} | "
                 f"Grad Norm: {grad_norm.item():.4f} | "
-                f"LR: {optimizer.param_groups[0]['lr']:.2e}"
+                f"LR: {current_lr:.2e}"
             )
+
+            # WandB logging
+            if wandb_logger:
+                # Compute detailed loss statistics for logging
+                with torch.no_grad():
+                    loss_std = losses.std().item()
+                    loss_max = losses.max().item()
+                    loss_min = losses.min().item()
+                    # Per-dimension loss (averaged over batch and chunk)
+                    loss_per_dim = losses.mean(dim=[0, 1]).cpu().numpy()  # (action_dim,)
+
+                wandb_log_dict = {
+                    "train/loss": loss.item(),
+                    "train/loss_std": loss_std,
+                    "train/loss_max": loss_max,
+                    "train/loss_min": loss_min,
+                    "train/grad_norm": grad_norm.item(),
+                    "train/learning_rate": current_lr,
+                }
+                # Add per-dimension loss (only first 14 dims to keep wandb clean)
+                for i in range(min(14, len(loss_per_dim))):
+                    wandb_log_dict[f"train/loss_dim_{i}"] = loss_per_dim[i]
+
+                wandb_logger.log_dict(wandb_log_dict, step)
 
         # Save checkpoint
         if step % cfg.save_freq == 0 or step == cfg.steps:
@@ -388,6 +422,10 @@ def main(cfg: ReflowTrainPipelineConfig):  # noqa: F405
             )
             update_last_checkpoint(checkpoint_dir)  # noqa: F405
             logging.info(f"✓ Checkpoint saved to {checkpoint_dir}")
+
+            # Log checkpoint to wandb
+            if wandb_logger:
+                wandb_logger.log_policy(checkpoint_dir)
 
         # Evaluation (if enabled)
         if cfg.eval_freq > 0 and step % cfg.eval_freq == 0 and cfg.env is not None:
