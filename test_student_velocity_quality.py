@@ -46,8 +46,9 @@ def test_student_velocity_quality(teacher_path, student_path, device="cuda"):
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
     tokens = tokenizer("pick up the bottle", return_tensors="pt", padding="max_length", max_length=48, truncation=True)
-    lang_tokens = tokens["input_ids"].to(device)
-    lang_masks = tokens["attention_mask"].to(device).bool()  # Ensure boolean type
+    # Expand to batch_size by repeating
+    lang_tokens = tokens["input_ids"].to(device).repeat(batch_size, 1)  # (batch_size, seq_len)
+    lang_masks = tokens["attention_mask"].to(device).bool().repeat(batch_size, 1)  # (batch_size, seq_len)
 
     # Use correct image size (512x512 for SmolVLA)
     img_size = teacher.config.resize_imgs_with_padding if teacher.config.resize_imgs_with_padding else (512, 512)
