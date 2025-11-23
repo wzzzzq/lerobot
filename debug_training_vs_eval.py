@@ -121,17 +121,25 @@ def simulate_eval_path(teacher, batch, device):
     raw_images = []
     for key in sorted(batch.keys()):
         if key.startswith("observation.images."):
-            img = batch[key][0].cpu()  # 取第一个batch item, shape should be [3, 480, 640]
+            img = batch[key][0].cpu()  # 取第一个batch item
             # Convert to numpy first
             img_np = img.numpy()
+
+            print(f"  DEBUG {key}: initial shape={img_np.shape}, dtype={img_np.dtype}")
+
             # 如果是[0, 1]范围，转回[0, 255]模拟环境输出
             if img_np.max() <= 1.0:
                 img_np = (img_np * 255.0).astype(np.uint8)
             else:
                 img_np = img_np.astype(np.uint8)
+
+            # img_np should be (C, H, W) = (3, 480, 640)
             # CHW → HWC (环境输出格式)
-            # img_np is (C, H, W), need to convert to (H, W, C)
-            img_hwc = np.transpose(img_np, (1, 2, 0))
+            if img_np.shape[0] == 3:  # CHW format
+                img_hwc = np.transpose(img_np, (1, 2, 0))
+            else:  # Already HWC
+                img_hwc = img_np
+
             raw_images.append(img_hwc)
             print(f"  {key}: shape={img_hwc.shape}, dtype={img_hwc.dtype}, range=[{img_hwc.min()}, {img_hwc.max()}]")
 
