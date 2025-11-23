@@ -42,11 +42,21 @@ def verify_fix(teacher_path: str, device: str = "cuda"):
     X_1_padded = pad_vector(X_1, max_action_dim)
 
     # Create dummy observations
-    images = torch.randn(batch_size, 1, 3, 224, 224, device=device, dtype=torch.float32)
-    img_masks = torch.ones(batch_size, 1, device=device, dtype=torch.bool)
-    lang_tokens = torch.randint(0, 1000, (batch_size, 20), device=device)
-    lang_masks = torch.ones(batch_size, 20, device=device, dtype=torch.bool)
-    state = torch.randn(batch_size, config.state_feature.shape[0], device=device, dtype=torch.float32)
+    # Use 512x512 based on teacher.config.resize_imgs_with_padding
+    # images should be a list of tensors (one per camera)
+    img_single = torch.randn(batch_size, 3, 512, 512, device=device, dtype=torch.float32)
+    images = [img_single]  # List with one camera
+    img_masks = [torch.ones(batch_size, device=device, dtype=torch.bool)]  # List with one mask
+    
+    lang_tokens = torch.randint(0, 1000, (batch_size, 48), device=device)  # max_length=48
+    lang_masks = torch.ones(batch_size, 48, device=device, dtype=torch.bool)
+    
+    # Determine state dimension
+    if hasattr(config, 'env_state_feature') and config.env_state_feature is not None:
+        state_dim = config.env_state_feature.shape[0]
+    else:
+        state_dim = config.max_state_dim  # Use max_state_dim as fallback
+    state = torch.randn(batch_size, state_dim, device=device, dtype=torch.float32)
 
     print("\n测试1: 验证X_0维度保持为32")
     print("-" * 80)
