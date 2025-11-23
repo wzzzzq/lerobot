@@ -95,13 +95,26 @@ def test_student_velocity_quality(
         images, img_masks = teacher.prepare_images(batch)
         state = teacher.prepare_state(batch)
 
+        # Try to get language tokens from batch, fallback to default if not present
         from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK
-        lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
-        lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
 
-        print(f"  Images: {len(images)} cameras")
-        print(f"  State shape: {state.shape}")
-        print(f"  Language tokens shape: {lang_tokens.shape}")
+        if f"{OBS_LANGUAGE_TOKENS}" in batch:
+            lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+            lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+            print(f"  Images: {len(images)} cameras")
+            print(f"  State shape: {state.shape}")
+            print(f"  Language tokens shape: {lang_tokens.shape}")
+        else:
+            # Dataset doesn't have language annotations, use default text
+            print(f"  ⚠️  Dataset没有language annotations，使用默认文本")
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
+            tokens = tokenizer("pick up the bottle", return_tensors="pt", padding="max_length", max_length=48, truncation=True)
+            lang_tokens = tokens["input_ids"].to(device).repeat(batch_size, 1)
+            lang_masks = tokens["attention_mask"].to(device).bool().repeat(batch_size, 1)
+            print(f"  Images: {len(images)} cameras")
+            print(f"  State shape: {state.shape}")
+            print(f"  Language tokens: 使用默认 'pick up the bottle'")
     else:
         print("\n⚠️  警告: 未提供dataset，使用随机数据（结果不可靠）")
         from transformers import AutoTokenizer
