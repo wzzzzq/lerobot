@@ -34,7 +34,9 @@ def print_tensor_info(name, tensor, indent=2):
         print(f"{prefix}  dtype: {tensor.dtype}")
         print(f"{prefix}  device: {tensor.device}")
         print(f"{prefix}  range: [{tensor.min().item():.4f}, {tensor.max().item():.4f}]")
-        print(f"{prefix}  mean: {tensor.mean().item():.4f}, std: {tensor.std().item():.4f}")
+        # Only compute mean/std for float tensors
+        if tensor.dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16]:
+            print(f"{prefix}  mean: {tensor.mean().item():.4f}, std: {tensor.std().item():.4f}")
     elif isinstance(tensor, list):
         print(f"{prefix}{name}: list of {len(tensor)} items")
         for i, item in enumerate(tensor):
