@@ -47,11 +47,13 @@ def test_forward_vs_sample_actions_velocity(teacher_path, device="cuda"):
     # 创建随机输入
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
-    tokens = tokenizer("pick up the bottle", return_tensors="pt", padding=True, max_length=48)
+    tokens = tokenizer("pick up the bottle", return_tensors="pt", padding="max_length", max_length=48, truncation=True)
     lang_tokens = tokens["input_ids"].to(device)
-    lang_masks = tokens["attention_mask"].to(device)
+    lang_masks = tokens["attention_mask"].to(device).bool()  # Ensure boolean type
 
-    images = [torch.randn(batch_size, 3, 224, 224, device=device) for _ in range(3)]
+    # Use correct image size (512x512 for SmolVLA)
+    img_size = teacher.config.resize_imgs_with_padding if teacher.config.resize_imgs_with_padding else (512, 512)
+    images = [torch.randn(batch_size, 3, img_size[0], img_size[1], device=device) for _ in range(3)]
     img_masks = [torch.ones(batch_size, dtype=torch.bool, device=device) for _ in range(3)]
     state = torch.randn(batch_size, teacher.config.max_state_dim, device=device)
 
