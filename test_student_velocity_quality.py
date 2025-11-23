@@ -95,30 +95,67 @@ def test_student_velocity_quality(
         images, img_masks = teacher.prepare_images(batch)
         state = teacher.prepare_state(batch)
 
-        # Debug: Print batch keys
+        # Tokenize task field (dataset uses 'task' instead of pre-tokenized language tokens)
         from lerobot.utils.constants import OBS_LANGUAGE_TOKENS, OBS_LANGUAGE_ATTENTION_MASK
-        print(f"\nBatch keys: {list(batch.keys())}")
-        print(f"Looking for: '{OBS_LANGUAGE_TOKENS}'")
-        print(f"Key in batch: {OBS_LANGUAGE_TOKENS in batch}")
+        from transformers import AutoTokenizer
 
-        # Try to get language tokens from batch, fallback to default if not present
         if OBS_LANGUAGE_TOKENS in batch:
-            lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
-            lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+            # Batch already has tokenized language (from preprocessor)
+            lang_tokens = batch[OBS_LANGUAGE_TOKENS]
+            lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
             print(f"  Images: {len(images)} cameras")
             print(f"  State shape: {state.shape}")
             print(f"  Language tokens shape: {lang_tokens.shape}")
-        else:
-            # Dataset doesn't have language annotations, use default text
-            print(f"  ⚠️  Dataset没有language annotations，使用默认文本")
-            from transformers import AutoTokenizer
+        elif "task" in batch:
+            # Dataset has 'task' field, need to tokenize it
+            task = batch["task"]
+            print(f"  ✓ Found 'task' field in batch")
+
             tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
-            tokens = tokenizer("pick up the bottle", return_tensors="pt", padding="max_length", max_length=48, truncation=True)
+
+            # Handle both single task string and list of tasks (for batched data)
+            if isinstance(task, str):
+                task_texts = [task]
+            elif isinstance(task, list):
+                task_texts = task
+            else:
+                # task is a tensor of indices or something else, convert to list
+                task_texts = ["pick up the bottle"] * batch_size
+                print(f"  ⚠️  'task' field has unexpected type, using default text")
+
+            # Ensure newline at end (required by SmolVLA)
+            task_texts = [t if t.endswith("\n") else f"{t}\n" for t in task_texts]
+
+            # Tokenize
+            tokens = tokenizer(
+                task_texts,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=teacher.config.tokenizer_max_length,
+                truncation=True
+            )
+            lang_tokens = tokens["input_ids"].to(device)
+            lang_masks = tokens["attention_mask"].to(device).bool()
+
+            print(f"  Images: {len(images)} cameras")
+            print(f"  State shape: {state.shape}")
+            print(f"  Language: tokenized from 'task' field")
+        else:
+            # No language data at all, use default
+            print(f"  ⚠️  No language data found, using default text")
+            tokenizer = AutoTokenizer.from_pretrained(teacher.config.vlm_model_name)
+            tokens = tokenizer(
+                "pick up the bottle\n",
+                return_tensors="pt",
+                padding="max_length",
+                max_length=teacher.config.tokenizer_max_length,
+                truncation=True
+            )
             lang_tokens = tokens["input_ids"].to(device).repeat(batch_size, 1)
             lang_masks = tokens["attention_mask"].to(device).bool().repeat(batch_size, 1)
             print(f"  Images: {len(images)} cameras")
             print(f"  State shape: {state.shape}")
-            print(f"  Language tokens: 使用默认 'pick up the bottle'")
+            print(f"  Language: default 'pick up the bottle'")
     else:
         print("\n⚠️  警告: 未提供dataset，使用随机数据（结果不可靠）")
         from transformers import AutoTokenizer
