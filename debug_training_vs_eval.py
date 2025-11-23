@@ -121,16 +121,19 @@ def simulate_eval_path(teacher, batch, device):
     raw_images = []
     for key in sorted(batch.keys()):
         if key.startswith("observation.images."):
-            img = batch[key][0].cpu()  # 取第一个batch item
+            img = batch[key][0].cpu()  # 取第一个batch item, shape should be [3, 480, 640]
+            # Convert to numpy first
+            img_np = img.numpy()
             # 如果是[0, 1]范围，转回[0, 255]模拟环境输出
-            if img.max() <= 1.0:
-                img = (img * 255.0).numpy().astype(np.uint8)
+            if img_np.max() <= 1.0:
+                img_np = (img_np * 255.0).astype(np.uint8)
             else:
-                img = img.numpy().astype(np.uint8)
+                img_np = img_np.astype(np.uint8)
             # CHW → HWC (环境输出格式)
-            img = np.transpose(img, (1, 2, 0))
-            raw_images.append(img)
-            print(f"  {key}: shape={img.shape}, dtype={img.dtype}, range=[{img.min()}, {img.max()}]")
+            # img_np is (C, H, W), need to convert to (H, W, C)
+            img_hwc = np.transpose(img_np, (1, 2, 0))
+            raw_images.append(img_hwc)
+            print(f"  {key}: shape={img_hwc.shape}, dtype={img_hwc.dtype}, range=[{img_hwc.min()}, {img_hwc.max()}]")
 
     # State: 假设环境返回原始joint values
     # ⚠️ 关键问题：dataset的state是否已归一化？
