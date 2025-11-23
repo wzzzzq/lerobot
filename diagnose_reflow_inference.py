@@ -361,6 +361,173 @@ def test_teacher_two_methods(
         return False
 
 
+def test_sample_actions_vs_forward_consistency(
+    teacher: SmolVLAPolicy,
+    images, img_masks, lang_tokens, lang_masks, state,
+    device: str
+):
+    """
+    测试sample_actions和forward的一致性
+
+    关键测试：在reflow训练中
+    - Teacher用sample_actions生成X0
+    - Student用forward来训练
+    - Student用sample_actions来推理
+
+    这个测试验证：Teacher用sample_actions生成的X0，
+    通过forward计算是否能得到合理的loss
+    """
+    print_section("关键测试: Sample_actions生成的X0 vs Forward验证")
+
+    teacher.eval()
+
+    batch_size = state.shape[0]
+    chunk_size = teacher.config.chunk_size
+    max_action_dim = teacher.config.max_action_dim
+
+    # 固定随机种子
+    torch.manual_seed(999)
+
+    with torch.no_grad():
+        # 步骤1: 生成随机噪声X_1
+        X_1 = torch.randn(batch_size, chunk_size, max_action_dim, device=device, dtype=torch.float32)
+
+        # 步骤2: Teacher用sample_actions从X_1生成X_0（模拟训练时teacher生成target）
+        print("步骤1: Teacher用sample_actions从噪声生成X0...")
+        X_0 = teacher.model.sample_actions(
+            images, img_masks, lang_tokens, lang_masks, state, noise=X_1
+        )
+
+        print(f"  X_0 shape: {X_0.shape}")
+        print(f"  X_0 mean: {X_0.mean().item():.6f}, std: {X_0.std().item():.6f}")
+        print(f"  X_0 range: [{X_0.min().item():.6f}, {X_0.max().item():.6f}]")
+
+        # 步骤3: 用forward验证这个X_0
+        # 如果sample_actions生成的X_0确实是从噪声正确积分得到的
+        # 那么用forward在各个时间点计算，loss应该合理
+        print("\n步骤2: 用forward验证X_0在不同时间点的一致性...")
+
+        test_times = [0.1, 0.3, 0.5, 0.7, 0.9]
+        losses_at_times = []
+
+        for t in test_times:
+            time_tensor = torch.tensor([t], device=device, dtype=torch.float32)
+
+            # Forward会在时间t计算loss
+            loss = teacher.model.forward(
+                images, img_masks, lang_tokens, lang_masks, state,
+                X_0, noise=X_1, time=time_tensor
+            )
+
+            mean_loss = loss.mean().item()
+            losses_at_times.append((t, mean_loss))
+            print(f"  t={t:.1f}: loss={mean_loss:.6f}")
+
+        # 步骤4: 检查loss的合理性
+        # 对于一个训练好的模型，loss应该相对较小
+        avg_loss = np.mean([l for _, l in losses_at_times])
+        max_loss = max([l for _, l in losses_at_times])
+
+        print(f"\n验证结果:")
+        print(f"  平均loss: {avg_loss:.6f}")
+        print(f"  最大loss: {max_loss:.6f}")
+
+        # 步骤5: 测试从相同噪声重新积分是否得到相同X_0
+        print("\n步骤3: 从相同噪声重新sample_actions，验证确定性...")
+        torch.manual_seed(999)
+        X_1_repeat = torch.randn(batch_size, chunk_size, max_action_dim, device=device, dtype=torch.float32)
+        X_0_repeat = teacher.model.sample_actions(
+            images, img_masks, lang_tokens, lang_masks, state, noise=X_1_repeat
+        )
+
+        diff = (X_0 - X_0_repeat).abs()
+        max_diff = diff.max().item()
+        mean_diff = diff.mean().item()
+
+        print(f"  X_0与重复生成的X_0'差异:")
+        print(f"    最大差异: {max_diff:.6e}")
+        print(f"    平均差异: {mean_diff:.6e}")
+
+        if max_diff < 1e-5:
+            print("  ✓ 重复生成完全一致（确定性正确）")
+            deterministic = True
+        else:
+            print(f"  ✗ 重复生成不一致！可能有随机性问题")
+            deterministic = False
+
+        return avg_loss, deterministic
+
+
+def test_teacher_student_sample_actions_comparison(
+    teacher: SmolVLAPolicy,
+    student: SmolVLAPolicy,
+    images, img_masks, lang_tokens, lang_masks, state,
+    device: str
+):
+    """
+    对比teacher和student用sample_actions从相同噪声生成的action
+
+    如果student训练正确，它应该能生成和teacher类似的action
+    """
+    print_section("对比Teacher和Student的sample_actions输出")
+
+    teacher.eval()
+    student.eval()
+
+    batch_size = state.shape[0]
+    chunk_size = teacher.config.chunk_size
+    max_action_dim = teacher.config.max_action_dim
+
+    # 固定随机种子
+    torch.manual_seed(888)
+    noise = torch.randn(batch_size, chunk_size, max_action_dim, device=device, dtype=torch.float32)
+
+    with torch.no_grad():
+        # Teacher生成
+        teacher_actions = teacher.model.sample_actions(
+            images, img_masks, lang_tokens, lang_masks, state, noise=noise.clone()
+        )
+
+        # Student生成（从相同噪声）
+        torch.manual_seed(888)
+        noise_student = torch.randn(batch_size, chunk_size, max_action_dim, device=device, dtype=torch.float32)
+        student_actions = student.model.sample_actions(
+            images, img_masks, lang_tokens, lang_masks, state, noise=noise_student
+        )
+
+    # 对比
+    diff = (teacher_actions - student_actions).abs()
+    max_diff = diff.max().item()
+    mean_diff = diff.mean().item()
+
+    # 计算相对差异
+    teacher_scale = teacher_actions.abs().mean().item()
+    relative_diff = mean_diff / (teacher_scale + 1e-8) * 100
+
+    print(f"Teacher输出: mean={teacher_actions.mean().item():.6f}, std={teacher_actions.std().item():.6f}")
+    print(f"Student输出: mean={student_actions.mean().item():.6f}, std={student_actions.std().item():.6f}")
+    print(f"\n差异统计:")
+    print(f"  最大差异: {max_diff:.6f}")
+    print(f"  平均差异: {mean_diff:.6f}")
+    print(f"  相对差异: {relative_diff:.2f}%")
+
+    if relative_diff < 1.0:
+        print("✓ Student和Teacher输出非常接近（相对差异 < 1%）")
+        print("  → Student训练效果很好")
+        return True
+    elif relative_diff < 10.0:
+        print("⚠️  Student和Teacher输出有一定差异（1% < 相对差异 < 10%）")
+        print("  → Student可能需要更多训练，或存在小问题")
+        return False
+    else:
+        print("✗ Student和Teacher输出差异很大（相对差异 > 10%）！")
+        print("  → 这可能说明:")
+        print("     1. Student训练有问题（train/eval模式不一致等）")
+        print("     2. Student还未充分训练")
+        print("     3. 训练和推理的代码路径不一致")
+        return False
+
+
 def test_noise_consistency(policy: SmolVLAPolicy, device: str):
     """测试噪声生成的一致性"""
     print_section("测试噪声生成一致性")
@@ -468,7 +635,17 @@ def main():
         student, images, img_masks, lang_tokens, lang_masks, state, "Student", args.device
     )
 
-    # 7. 测试噪声一致性
+    # 7. 【关键测试】测试teacher的sample_actions和forward一致性
+    avg_loss, sample_actions_deterministic = test_sample_actions_vs_forward_consistency(
+        teacher, images, img_masks, lang_tokens, lang_masks, state, args.device
+    )
+
+    # 8. 【关键测试】对比teacher和student的sample_actions输出
+    teacher_student_similar = test_teacher_student_sample_actions_comparison(
+        teacher, student, images, img_masks, lang_tokens, lang_masks, state, args.device
+    )
+
+    # 9. 测试噪声一致性
     test_noise_consistency(teacher, args.device)
 
     # 最终总结
@@ -488,6 +665,12 @@ def main():
     if not student_train_eval_consistent:
         issues.append("✗ Student在train和eval模式下输出不一致")
 
+    if not sample_actions_deterministic:
+        issues.append("✗ sample_actions生成的结果不确定（有随机性）")
+
+    if not teacher_student_similar:
+        issues.append("⚠️  Student和Teacher的输出差异较大（可能训练不足或有bug）")
+
     if issues:
         print("发现以下问题:\n")
         for issue in issues:
@@ -503,6 +686,16 @@ def main():
 
         if not student_train_eval_consistent:
             print("  3. 检查模型中的Dropout/BatchNorm层，考虑在推理时禁用")
+
+        if not sample_actions_deterministic:
+            print("  4. 检查sample_actions中是否有未控制的随机性")
+            print("     确保使用固定随机种子时结果可重复")
+
+        if not teacher_student_similar:
+            print("  5. Student和Teacher输出差异大，可能原因:")
+            print("     - Student训练时使用train()模式，应改为eval()模式")
+            print("     - Student训练步数不够")
+            print("     - 训练和推理的代码路径不一致（forward vs sample_actions）")
     else:
         print("✓ 未发现明显问题，可能需要进一步调试")
 
