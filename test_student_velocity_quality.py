@@ -38,7 +38,7 @@ def test_student_velocity_quality(teacher_path, student_path, device="cuda"):
     student.eval()
 
     # 准备测试数据
-    batch_size = 1
+    batch_size = 32
     chunk_size = teacher.config.chunk_size
     max_action_dim = teacher.config.max_action_dim
     action_dim = teacher.config.action_feature.shape[0]
